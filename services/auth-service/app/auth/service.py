@@ -21,11 +21,16 @@ class AuthService:
     def __init__(self, db: Session):
         self.db = db
     
-    # ========== ثبت‌نام ==========
     def register(self, data: UserRegisterRequest) -> User:
         existing = self.db.query(User).filter(User.phone_number == data.phone_number).first()
         if existing:
             raise UserExistsException()
+
+        if data.email:
+            existing_email = self.db.query(User).filter(User.email == data.email).first()
+            if existing_email:
+                from app.core.exceptions import AuthException
+                raise AuthException("این ایمیل قبلاً ثبت شده است", 409)
         
         user = User(
             id=uuid.uuid4(),
@@ -40,16 +45,13 @@ class AuthService:
         self.db.refresh(user)
         return user
     
-    # ========== OTP ==========
     def create_otp(self, phone_number: str, purpose: str, user_id: uuid.UUID = None) -> str:
         code = generate_otp()
         
-        # Rate limit: حداکثر 3 OTP در 10 دقیقه
         rate_key = f"otp_rate:{phone_number}"
         if not check_rate_limit(rate_key, limit=3, window=600):
             raise RateLimitException()
         
-        # غیرفعال کردن OTPهای قبلی
         self.db.query(OTPCode).filter(
             OTPCode.phone_number == phone_number,
             OTPCode.purpose == purpose,
@@ -80,7 +82,12 @@ class AuthService:
         if not otp:
             raise OTPInvalidException()
         
-        if otp.expires_at < datetime.now(timezone.utc):
+        now = datetime.now(timezone.utc)
+        expires_at = otp.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        
+        if expires_at < now:
             raise OTPExpiredException()
         
         if not verify_otp(data.code, otp.code_hash):
@@ -99,16 +106,13 @@ class AuthService:
         
         return user
     
-    # ========== ورود با رمز عبور ==========
     def login(self, data: LoginRequest, ip_address: str = None) -> dict:
-        # Rate limit: حداکثر 5 تلاش در 15 دقیقه
         rate_key = f"login_rate:{data.phone_number}"
         if not check_rate_limit(rate_key, limit=5, window=900):
             raise RateLimitException()
         
         user = self.db.query(User).filter(User.phone_number == data.phone_number).first()
         
-        # ثبت تلاش ورود
         attempt = LoginAttempt(
             id=uuid.uuid4(),
             phone_number=data.phone_number,
@@ -117,7 +121,6 @@ class AuthService:
         )
         self.db.add(attempt)
         
-        # پیام یکسان برای جلوگیری از user enumeration
         if not user or not verify_password(data.password, user.password_hash):
             self.db.commit()
             raise InvalidCredentialsException()
@@ -135,12 +138,10 @@ class AuthService:
         
         return self._generate_tokens(user)
     
-    # ========== ورود با OTP ==========
     def login_with_otp(self, data: OTPVerifyRequest) -> dict:
         user = self.verify_otp_code(data, purpose="LOGIN")
         return self._generate_tokens(user)
     
-    # ========== تمدید توکن ==========
     def refresh_access_token(self, data: RefreshTokenRequest) -> dict:
         try:
             payload = decode_token(data.refresh_token)
@@ -153,12 +154,10 @@ class AuthService:
             if not user or not user.is_active:
                 raise InvalidCredentialsException()
             
-            # بررسی لیست سیاه
             jti = payload.get("jti") or str(uuid.uuid4())
             if is_token_blacklisted(jti):
                 raise InvalidCredentialsException()
             
-            # بررسی Refresh Token در دیتابیس
             token_hash = hash_password(data.refresh_token)
             rt = self.db.query(RefreshToken).filter(
                 RefreshToken.user_id == user_id,
@@ -170,7 +169,6 @@ class AuthService:
             if not rt:
                 raise InvalidCredentialsException()
             
-            # ابطال refresh token قبلی
             rt.revoked = True
             self.db.commit()
             
@@ -179,7 +177,6 @@ class AuthService:
         except Exception:
             raise InvalidCredentialsException()
     
-    # ========== خروج ==========
     def logout(self, user_id: str, refresh_token: str = None):
         if refresh_token:
             try:
@@ -190,7 +187,6 @@ class AuthService:
                 ttl = max(exp - now, 60)
                 blacklist_token(jti, ttl)
                 
-                # ابطال در دیتابیس
                 token_hash = hash_password(refresh_token)
                 self.db.query(RefreshToken).filter(
                     RefreshToken.token_hash == token_hash
@@ -201,7 +197,6 @@ class AuthService:
         
         return {"message": "با موفقیت خارج شدید"}
     
-    # ========== بازیابی رمز عبور ==========
     def reset_password(self, data: PasswordResetRequest) -> dict:
         user = self.verify_otp_code(
             OTPVerifyRequest(phone_number=data.phone_number, code=data.code),
@@ -211,7 +206,6 @@ class AuthService:
         user.password_hash = hash_password(data.new_password)
         self.db.commit()
         
-        # ابطال همه refresh tokenها
         self.db.query(RefreshToken).filter(
             RefreshToken.user_id == user.id
         ).update({"revoked": True})
@@ -219,12 +213,10 @@ class AuthService:
         
         return {"message": "رمز عبور با موفقیت تغییر کرد"}
     
-    # ========== توکن‌ها ==========
     def _generate_tokens(self, user: User) -> dict:
         access_token = create_access_token(user.id, user.role, user.is_phone_verified)
         refresh_token = create_refresh_token(user.id)
         
-        # ذخیره refresh token
         rt = RefreshToken(
             id=uuid.uuid4(),
             user_id=user.id,
@@ -247,6 +239,5 @@ class AuthService:
             }
         }
     
-    # ========== دریافت کاربر ==========
     def get_user_by_id(self, user_id: uuid.UUID) -> User:
         return self.db.query(User).filter(User.id == user_id).first()
