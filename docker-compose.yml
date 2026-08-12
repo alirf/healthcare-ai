@@ -74,5 +74,59 @@ services:
       redis:
         condition: service_healthy
 
+        profile-service:
+    build: ./user-profile-service
+    container_name: profile-service
+    ports:
+      - "8002:8002"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@profile-db:5432/profile_db
+      - JWT_PUBLIC_KEY_PATH=/app/keys/public.pem
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_BUCKET_NAME=profile-images
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+    volumes:
+      - ../keys/public.pem:/app/keys/public.pem:ro
+    depends_on:
+      - profile-db
+      - minio
+    networks:
+      - healthcare-network
+
+  profile-db:
+    image: postgres:15-alpine
+    container_name: profile-db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=profile_db
+    volumes:
+      - profile-db-data:/var/lib/postgresql/data
+    networks:
+      - healthcare-network
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - healthcare-network
+
 volumes:
+  profile-db-data:
+  minio-data:
   pgdata:
+
+networks:
+  healthcare-network:
+    external: true
