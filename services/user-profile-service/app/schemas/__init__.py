@@ -1,0 +1,46 @@
+"""Pydantic schemas package."""
+from app.schemas.patient import (
+    PatientProfileBase,
+    PatientProfileCreate,
+    PatientProfileUpdate,
+    PatientProfileResponse,
+    AllergyCreate,
+    AllergyUpdate,
+    AllergyResponse,
+    MedicationCreate,
+    MedicationUpdate,
+    MedicationResponse,
+    ConditionCreate,
+    ConditionUpdate,
+    ConditionResponse,
+    MedicalSummaryResponse,
+    AvatarResponse,
+)
+from app.schemas.doctor import (
+    DoctorProfileBase,
+    DoctorProfileCreate,
+    DoctorProfileUpdate,
+    DoctorProfileResponse,
+)
+
+__all__ = [
+    "PatientProfileBase",
+    "PatientProfileCreate",
+    "PatientProfileUpdate",
+    "PatientProfileResponse",
+    "AllergyCreate",
+    "AllergyUpdate",
+    "AllergyResponse",
+    "MedicationCreate",
+    "MedicationUpdate",
+    "MedicationResponse",
+    "ConditionCreate",
+    "ConditionUpdate",
+    "ConditionResponse",
+    "MedicalSummaryResponse",
+    "AvatarResponse",
+    "DoctorProfileBase",
+    "DoctorProfileCreate",
+    "DoctorProfileUpdate",
+    "DoctorProfileResponse",
+]
