@@ -10,6 +10,7 @@ router = APIRouter()
 # جدول مسیریابی سرویس‌ها
 SERVICES = {
     "auth": settings.AUTH_SERVICE_URL,
+    "profile": settings.PROFILE_SERVICE_URL,
     # در آینده اضافه می‌شوند:
     # "patients": "http://profile-service:3002",
     # "intake": "http://symptom-intake-service:3003",
@@ -95,5 +96,6 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "api-gateway",
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "services": list(SERVICES.keys())
     }

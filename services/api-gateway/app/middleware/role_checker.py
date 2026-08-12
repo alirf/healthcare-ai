@@ -8,6 +8,15 @@ PROTECTED_ROUTES = {
     "/api/prescriptions/create": ["DOCTOR", "ADMIN"],
     "/api/prescriptions/approve": ["DOCTOR", "ADMIN"],
     "/api/admin/": ["ADMIN"],
+
+    "/api/profile/patient/me": ["PATIENT"],
+    "/api/profile/patient/me/allergies": ["PATIENT"],
+    "/api/profile/patient/me/medications": ["PATIENT"],
+    "/api/profile/patient/me/conditions": ["PATIENT"],
+    "/api/profile/patient/me/avatar": ["PATIENT"],
+
+    "/api/profile/doctor/me": ["DOCTOR"],
+    "/api/profile/doctor/me/avatar": ["DOCTOR"],
 }
 
 

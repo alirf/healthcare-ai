@@ -74,11 +74,12 @@ services:
       redis:
         condition: service_healthy
 
-        profile-service:
+  # ─── User Profile Service ─────────────────────────
+  profile-service:
     build: ./user-profile-service
     container_name: profile-service
     ports:
-      - "8002:8002"
+      - "3002:8002"
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:password@profile-db:5432/profile_db
       - JWT_PUBLIC_KEY_PATH=/app/keys/public.pem
@@ -86,7 +87,9 @@ services:
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
       - MINIO_BUCKET_NAME=profile-images
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - MINIO_SECURE=false
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-internal-secret-key-12345}
+      - MAX_AVATAR_SIZE_MB=5
     volumes:
       - ../keys/public.pem:/app/keys/public.pem:ro
     depends_on:

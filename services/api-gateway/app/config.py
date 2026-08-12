@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     
     # Auth Service
     AUTH_SERVICE_URL: str = "http://localhost:3001"
+
+    # Profile Service
+    PROFILE_SERVICE_URL: str = "http://localhost:3002"
     
     # JWT
     PUBLIC_KEY_PATH: str = "keys/public.pem"
@@ -20,6 +23,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_PUBLIC: int = 10      # درخواست در دقیقه (IP-based)
     RATE_LIMIT_AUTH: int = 60        # درخواست در دقیقه (user-based)
     RATE_LIMIT_AI_TRIAGE: int = 5    # درخواست در دقیقه (user-based)
+    RATE_LIMIT_PROFILE: int = 30     # درخواست در دقیقه (user-based)
     
     # CORS
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:8081"
