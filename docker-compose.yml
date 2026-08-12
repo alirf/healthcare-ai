@@ -1,23 +1,78 @@
 version: '3.8'
 
 services:
+  # ─── Database ─────────────────────────────────────
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16
     container_name: healthcare-postgres
     environment:
-      POSTGRES_DB: healthcare_auth
+      POSTGRES_DB: auth_db
       POSTGRES_USER: admin
-      POSTGRES_PASSWORD: your_secure_password
+      POSTGRES_PASSWORD: changeme
+    volumes:
+      - pgdata:/var/lib/postgresql/data
     ports:
       - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d auth_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
+  # ─── Cache ────────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: healthcare-redis
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ─── Auth Service ─────────────────────────────────
+  auth-service:
+    build: ./auth-service
+    container_name: healthcare-auth
+    environment:
+      DATABASE_URL: postgres://admin:changeme@postgres:5432/auth_db
+      REDIS_URL: redis://redis:6379
+      PRIVATE_KEY_PATH: keys/private.pem
+      PUBLIC_KEY_PATH: keys/public.pem
+    volumes:
+      - ./keys:/app/keys:ro
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ─── API Gateway ──────────────────────────────────
+  api-gateway:
+    build: ./api-gateway
+    container_name: healthcare-gateway
+    environment:
+      GATEWAY_PORT: 8080
+      GATEWAY_HOST: 0.0.0.0
+      REDIS_URL: redis://redis:6379
+      AUTH_SERVICE_URL: http://auth-service:3001
+      PUBLIC_KEY_PATH: keys/public.pem
+      RATE_LIMIT_PUBLIC: 10
+      RATE_LIMIT_AUTH: 60
+      RATE_LIMIT_AI_TRIAGE: 5
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:8081
+    volumes:
+      - ./keys:/app/keys:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      auth-service:
+        condition: service_started
+      redis:
+        condition: service_healthy
 
 volumes:
-  postgres_data:
+  pgdata:
