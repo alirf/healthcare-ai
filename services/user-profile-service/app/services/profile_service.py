@@ -420,3 +420,19 @@ class ProfileService:
         
         await self.db.flush()
         return profile
+
+    async def update_doctor_avatar(
+        self, user_id: UUID, image_url: str, image_key: str
+    ) -> Optional[DoctorProfile]:
+        """Update doctor avatar URL and storage key."""
+        result = await self.db.execute(
+            select(DoctorProfile).where(DoctorProfile.user_id == user_id)
+        )
+        profile = result.scalar_one_or_none()
+        if not profile:
+            return None
+        
+        profile.profile_image_url = image_url
+        profile.profile_image_key = image_key
+        await self.db.flush()
+        return profile
