@@ -3,6 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, status, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.database import get_db
 from app.dependencies.auth import get_current_user, require_role
@@ -11,6 +12,7 @@ from app.schemas.doctor import (
     DoctorProfileUpdate,
     DoctorProfileResponse,
 )
+from app.models.doctor import DoctorProfile
 from app.services.profile_service import ProfileService
 from app.services.storage_service import StorageService
 from app.services.audit_service import AuditService

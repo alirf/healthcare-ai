@@ -18,6 +18,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - healthcare-network
 
   # ─── Cache ────────────────────────────────────────
   redis:
@@ -49,6 +51,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    networks:
+      - healthcare-network
 
   # ─── API Gateway ──────────────────────────────────
   api-gateway:
@@ -59,10 +63,12 @@ services:
       GATEWAY_HOST: 0.0.0.0
       REDIS_URL: redis://redis:6379
       AUTH_SERVICE_URL: http://auth-service:3001
+      PROFILE_SERVICE_URL: http://profile-service:8002
       PUBLIC_KEY_PATH: keys/public.pem
       RATE_LIMIT_PUBLIC: 10
       RATE_LIMIT_AUTH: 60
       RATE_LIMIT_AI_TRIAGE: 5
+      RATE_LIMIT_PROFILE: 30
       ALLOWED_ORIGINS: http://localhost:3000,http://localhost:8081
     volumes:
       - ./keys:/app/keys:ro
@@ -73,6 +79,8 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+    networks:
+      - healthcare-network
 
   # ─── User Profile Service ─────────────────────────
   profile-service:
@@ -81,20 +89,23 @@ services:
     ports:
       - "3002:8002"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:password@profile-db:5432/profile_db
-      - JWT_PUBLIC_KEY_PATH=/app/keys/public.pem
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-      - MINIO_BUCKET_NAME=profile-images
-      - MINIO_SECURE=false
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-internal-secret-key-12345}
-      - MAX_AVATAR_SIZE_MB=5
+      DATABASE_URL: postgresql+asyncpg://postgres:password@profile-db:5432/profile_db
+      JWT_PUBLIC_KEY_PATH: /app/keys/public.pem
+      JWT_ALGORITHM: RS256
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_NAME: profile-images
+      MINIO_SECURE: "false"
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-internal-secret-key-12345}
+      MAX_AVATAR_SIZE_MB: 5
     volumes:
-      - ../keys/public.pem:/app/keys/public.pem:ro
+      - ./keys/public.pem:/app/keys/public.pem:ro
     depends_on:
-      - profile-db
-      - minio
+      profile-db:
+        condition: service_healthy
+      minio:
+        condition: service_started
     networks:
       - healthcare-network
 
@@ -102,11 +113,16 @@ services:
     image: postgres:15-alpine
     container_name: profile-db
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=profile_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: profile_db
     volumes:
       - profile-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d profile_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     networks:
       - healthcare-network
 
@@ -115,21 +131,26 @@ services:
     container_name: minio
     command: server /data --console-address ":9001"
     environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
     volumes:
       - minio-data:/data
     ports:
       - "9000:9000"
       - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - healthcare-network
 
 volumes:
+  pgdata:
   profile-db-data:
   minio-data:
-  pgdata:
 
 networks:
   healthcare-network:
-    external: true
+    driver: bridge

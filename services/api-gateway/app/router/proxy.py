@@ -1,25 +1,18 @@
 import httpx
 from fastapi import Request, APIRouter, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 
 from app.config import settings
 
 
 router = APIRouter()
 
-# جدول مسیریابی سرویس‌ها
 SERVICES = {
     "auth": settings.AUTH_SERVICE_URL,
     "profile": settings.PROFILE_SERVICE_URL,
-    # در آینده اضافه می‌شوند:
-    # "patients": "http://profile-service:3002",
-    # "intake": "http://symptom-intake-service:3003",
-    # "doctor-review": "http://doctor-review-service:3005",
-    # "prescriptions": "http://prescription-service:3006",
-    # "notifications": "http://notification-service:3007",
 }
 
-# مسیرهایی که فقط داخلی هستند و نباید از بیرون دسترسی داشته باشند
+# مسیرهایی که فقط داخلی هستند
 INTERNAL_ONLY = {"triage"}
 
 
@@ -27,7 +20,7 @@ async def proxy_request(service: str, path: str, request: Request):
     """پروکسی درخواست به سرویس مقصد"""
     
     if service in INTERNAL_ONLY:
-        raise HTTPException(status_code=403, detail="Forbidden")
+        raise HTTPException(status_code=403, detail="Forbidden: Internal service only")
     
     if service not in SERVICES:
         raise HTTPException(status_code=404, detail=f"Service '{service}' not found")
@@ -47,9 +40,10 @@ async def proxy_request(service: str, path: str, request: Request):
     if user_role:
         headers["x-user-role"] = str(user_role)
     
-    # حذف authorization از هدرهای ارسالی به سرویس داخلی
-    # (چون سرویس‌ها فقط به x-user-id و x-user-role اعتماد می‌کنند)
-    headers.pop("authorization", None)
+    headers["x-gateway-request"] = "true"
+    
+    if path.startswith("internal/"):
+        headers["x-internal-api-key"] = settings.INTERNAL_API_KEY
     
     body = await request.body()
     
@@ -63,7 +57,6 @@ async def proxy_request(service: str, path: str, request: Request):
                 content=body if body else None,
             )
             
-            # برگرداندن پاسخ
             return JSONResponse(
                 content=response.json() if response.content else {},
                 status_code=response.status_code,
@@ -71,15 +64,9 @@ async def proxy_request(service: str, path: str, request: Request):
             )
             
         except httpx.ConnectError:
-            raise HTTPException(
-                status_code=503,
-                detail=f"Service '{service}' is not available"
-            )
+            raise HTTPException(status_code=503, detail=f"Service '{service}' unavailable")
         except httpx.TimeoutException:
-            raise HTTPException(
-                status_code=504,
-                detail=f"Timeout while connecting to service '{service}'"
-            )
+            raise HTTPException(status_code=504, detail=f"Timeout connecting to '{service}'")
 
 
 @router.api_route(
@@ -90,7 +77,6 @@ async def gateway_proxy(service: str, path: str, request: Request):
     return await proxy_request(service, path, request)
 
 
-# مسیر سلامتی Gateway
 @router.get("/health")
 async def health_check():
     return {
