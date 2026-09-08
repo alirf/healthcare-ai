@@ -1,3 +1,4 @@
+# app/main.py (بدون تغییر)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -35,15 +36,3 @@ app.add_middleware(RoleCheckerMiddleware)       # ۴. بررسی نقش
 
 # Router
 app.include_router(proxy.router)
-
-
-@app.on_event("startup")
-async def startup_event():
-    print("🚀 API Gateway started successfully!")
-    print(f"📍 Auth Service: {settings.AUTH_SERVICE_URL}")
-    print(f"📍 Redis: {settings.REDIS_URL}")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    print("👋 API Gateway shutting down...")

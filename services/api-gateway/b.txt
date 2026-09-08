@@ -1,0 +1,530 @@
+======================================================================
+📁 پوشه مبدا: D:\med\healthcare-ai\services\api-gateway
+📊 تعداد فایل‌های جمع‌آوری شده: 12
+❌ تعداد خطاها: 0
+📁 پوشه‌های رد شده: public, .vscode, venv, node_modules, static, target, .output, .next, coverage, .venv, .env, dist, __pycache__, .idea, env, .nuxt, assets, build, .git, out
+======================================================================
+⚡ فقط پسوندهای: .py, .ts, .tsx, .java
+======================================================================
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/__init__.py
+──────────────────────────────────────────────────────────────────────
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/config.py
+──────────────────────────────────────────────────────────────────────
+# app/config.py
+from pathlib import Path              # ← اضافه کن
+from pydantic_settings import BaseSettings
+from functools import lru_cache
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+class Settings(BaseSettings):
+    GATEWAY_PORT: int = 8080
+    GATEWAY_HOST: str = "0.0.0.0"
+    REDIS_URL: str = "redis://localhost:6379"
+    AUTH_SERVICE_URL: str = "http://localhost:3001"
+    PROFILE_SERVICE_URL: str = "http://localhost:3002"
+    PUBLIC_KEY_PATH: str = str(BASE_DIR / "keys" / "public.pem")
+    RATE_LIMIT_PUBLIC: int = 10
+    RATE_LIMIT_AUTH: int = 60
+    RATE_LIMIT_AI_TRIAGE: int = 5
+    RATE_LIMIT_PROFILE: int = 30
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:8081"
+    INTERNAL_API_KEY: str = "change-me-in-production-32-char-min"
+
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()
+
+──────────────────────────────────────────────────────────────────────
+📄 app/main.py
+──────────────────────────────────────────────────────────────────────
+# app/main.py (بدون تغییر)
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.config import settings
+from app.middleware.jwt_validation import JWTValidationMiddleware
+from app.middleware.rate_limiter import RateLimiterMiddleware
+from app.middleware.logging_middleware import LoggingMiddleware
+from app.middleware.role_checker import RoleCheckerMiddleware
+from app.router import proxy
+
+
+app = FastAPI(
+    title="Healthcare AI - API Gateway",
+    description="API Gateway for Healthcare AI",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.ALLOWED_ORIGINS.split(","),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["X-Process-Time", "X-RateLimit-Remaining", "Retry-After"]
+)
+
+# Middlewareها (ترتیب مهم است!)
+app.add_middleware(LoggingMiddleware)           # ۱. لاگ‌گیری
+app.add_middleware(RateLimiterMiddleware)       # ۲. محدودیت نرخ
+app.add_middleware(JWTValidationMiddleware)     # ۳. اعتبارسنجی JWT
+app.add_middleware(RoleCheckerMiddleware)       # ۴. بررسی نقش
+
+# Router
+app.include_router(proxy.router)
+
+──────────────────────────────────────────────────────────────────────
+📄 app/middleware/__init__.py
+──────────────────────────────────────────────────────────────────────
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/middleware/jwt_validation.py
+──────────────────────────────────────────────────────────────────────
+# app/middleware/jwt_validation.py
+import jwt
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from pathlib import Path
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from app.config import settings
+
+
+PUBLIC_ROUTES = {
+    "/auth/login",
+    "/auth/register",
+    "/auth/verify-otp",
+    "/auth/refresh",
+    "/auth/health",
+    "/api/auth/login",
+    "/api/auth/register", 
+    "/api/auth/verify-otp",
+    "/api/auth/refresh",
+    "/api/auth/health",
+    "/docs",
+    "/openapi.json",
+    "/redoc",
+    "/health",
+}
+
+
+class JWTValidationMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, **kwargs):
+        super().__init__(app)
+        self.public_key = Path(settings.PUBLIC_KEY_PATH).read_text()
+    
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        
+        if any(path.startswith(route) for route in PUBLIC_ROUTES):
+            return await call_next(request)
+        
+        auth_header = request.headers.get("authorization")
+        if not auth_header:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Token not sent.", "code": "MISSING_TOKEN"}
+            )
+        
+        if not auth_header.startswith("Bearer "):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "The token format is invalid.", "code": "INVALID_TOKEN_FORMAT"}
+            )
+        
+        token = auth_header.replace("Bearer ", "")
+        
+        try:
+            payload = jwt.decode(
+                token,
+                self.public_key,
+                algorithms=["RS256"],
+                options={"require": ["exp", "sub", "role"]}
+            )
+            
+            request.state.user_id = payload.get("sub")
+            request.state.user_role = payload.get("role")
+            request.state.token_payload = payload
+            
+        except jwt.ExpiredSignatureError:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Token has expired.", "code": "TOKEN_EXPIRED"}
+            )
+        except jwt.InvalidTokenError as e:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": f"Token is invalid: {str(e)}", "code": "INVALID_TOKEN"}
+            )
+        
+        return await call_next(request)
+
+──────────────────────────────────────────────────────────────────────
+📄 app/middleware/logging_middleware.py
+──────────────────────────────────────────────────────────────────────
+import time
+import json
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+class LoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start_time = time.time()
+        
+        # اطلاعات درخواست
+        method = request.method
+        path = request.url.path
+        query = str(request.query_params)
+        client_ip = request.client.host if request.client else "unknown"
+        user_agent = request.headers.get("user-agent", "unknown")
+        user_id = getattr(request.state, "user_id", "anonymous")
+        user_role = getattr(request.state, "user_role", "none")
+        
+        # ارسال درخواست
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+        except Exception as exc:
+            status_code = 500
+            raise exc
+        finally:
+            process_time = (time.time() - start_time) * 1000  # میلی‌ثانیه
+            
+            log_entry = {
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "method": method,
+                "path": path,
+                "query": query if query else None,
+                "status_code": status_code,
+                "process_time_ms": round(process_time, 2),
+                "client_ip": client_ip,
+                "user_id": user_id,
+                "user_role": user_role,
+                "user_agent": user_agent,
+            }
+            
+            # لاگ در stdout (در Docker با json formatter قابل جمع‌آوری است)
+            print(json.dumps(log_entry, ensure_ascii=False))
+        
+        # اضافه کردن هدر زمان پاسخ
+        response.headers["X-Process-Time"] = str(round(process_time, 2))
+        return response
+
+──────────────────────────────────────────────────────────────────────
+📄 app/middleware/rate_limiter.py
+──────────────────────────────────────────────────────────────────────
+# app/middleware/rate_limiter.py
+import time
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from app.config import settings
+from app.utils.redis_client import get_redis_client
+
+
+class RateLimiterMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, **kwargs):
+        super().__init__(app)
+        self.redis = get_redis_client()
+        self.public_limit = settings.RATE_LIMIT_PUBLIC
+        self.auth_limit = settings.RATE_LIMIT_AUTH
+        self.ai_triage_limit = settings.RATE_LIMIT_AI_TRIAGE
+        self.profile_limit = settings.RATE_LIMIT_PROFILE
+    
+    def _get_key(self, identifier: str, window: int) -> str:
+        current_window = int(time.time()) // window
+        return f"rate_limit:{identifier}:{current_window}"
+    
+    def _check_limit(self, key: str, limit: int, window: int = 60) -> tuple[bool, int, int]:
+        pipe = self.redis.pipeline()
+        pipe.incr(key)
+        pipe.expire(key, window)
+        results = pipe.execute()
+        
+        current_count = results[0]
+        remaining = max(0, limit - current_count)
+        reset_after = window - (int(time.time()) % window)
+        
+        allowed = current_count <= limit
+        return allowed, remaining, reset_after
+    
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        
+        public_paths = ["/api/auth/login", "/api/auth/register", "/api/auth/verify-otp"]
+        if any(path.startswith(p) for p in public_paths):
+            identifier = f"ip:{request.client.host}"
+            allowed, remaining, reset_after = self._check_limit(
+                self._get_key(identifier, 60), self.public_limit
+            )
+            if not allowed:
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "detail": "Access from this IP address has been rate-limited",
+                        "code": "RATE_LIMIT_EXCEEDED",
+                        "retry_after": reset_after
+                    },
+                    headers={"Retry-After": str(reset_after)}
+                )
+            response = await call_next(request)
+            response.headers["X-RateLimit-Remaining"] = str(remaining)
+            return response
+        
+        profile_paths = ["/api/profile/"]
+        if any(path.startswith(p) for p in profile_paths):
+            user_id = getattr(request.state, "user_id", None)
+            if user_id:
+                identifier = f"user:{user_id}:profile"
+                allowed, remaining, reset_after = self._check_limit(
+                    self._get_key(identifier, 60), self.profile_limit
+                )
+                if not allowed:
+                    return JSONResponse(
+                        status_code=429,
+                        content={
+                            "detail": "Access from this IP address has been rate-limited",
+                            "code": "PROFILE_RATE_LIMIT_EXCEEDED",
+                            "retry_after": reset_after
+                        },
+                        headers={"Retry-After": str(reset_after)}
+                    )
+                response = await call_next(request)
+                response.headers["X-RateLimit-Remaining"] = str(remaining)
+                return response
+        
+        if path.startswith("/api/intake/") and "ai" in path:
+            user_id = getattr(request.state, "user_id", None)
+            if user_id:
+                identifier = f"user:{user_id}:ai"
+                allowed, remaining, reset_after = self._check_limit(
+                    self._get_key(identifier, 60), self.ai_triage_limit
+                )
+                if not allowed:
+                    return JSONResponse(
+                        status_code=429,
+                        content={
+                            "detail": "Access from this IP address has been rate-limited for AI Triage",
+                            "code": "AI_RATE_LIMIT_EXCEEDED",
+                            "retry_after": reset_after
+                        },
+                        headers={"Retry-After": str(reset_after)}
+                    )
+                response = await call_next(request)
+                response.headers["X-RateLimit-Remaining"] = str(remaining)
+                return response
+        
+        user_id = getattr(request.state, "user_id", None)
+        if user_id:
+            identifier = f"user:{user_id}"
+            allowed, remaining, reset_after = self._check_limit(
+                self._get_key(identifier, 60), self.auth_limit
+            )
+            if not allowed:
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "detail": "Access from this IP address has been rate-limited",
+                        "code": "RATE_LIMIT_EXCEEDED",
+                        "retry_after": reset_after
+                    },
+                    headers={"Retry-After": str(reset_after)}
+                )
+            response = await call_next(request)
+            response.headers["X-RateLimit-Remaining"] = str(remaining)
+            return response
+        
+        return await call_next(request)
+
+──────────────────────────────────────────────────────────────────────
+📄 app/middleware/role_checker.py
+──────────────────────────────────────────────────────────────────────
+# app/middleware/role_checker.py
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+PROTECTED_ROUTES = {
+    "/api/doctor-review/": ["DOCTOR", "ADMIN"],
+    "/api/prescriptions/create": ["DOCTOR", "ADMIN"],
+    "/api/prescriptions/approve": ["DOCTOR", "ADMIN"],
+    "/api/admin/": ["ADMIN"],
+    "/api/profile/patient/me": ["PATIENT"],
+    "/api/profile/patient/me/allergies": ["PATIENT"],
+    "/api/profile/patient/me/medications": ["PATIENT"],
+    "/api/profile/patient/me/conditions": ["PATIENT"],
+    "/api/profile/patient/me/avatar": ["PATIENT"],
+    "/api/profile/doctor/me": ["DOCTOR"],
+    "/api/profile/doctor/me/avatar": ["DOCTOR"],
+}
+
+
+class RoleCheckerMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, **kwargs):
+        super().__init__(app)
+    
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        user_role = getattr(request.state, "user_role", None)
+        
+        for route_prefix, allowed_roles in PROTECTED_ROUTES.items():
+            if path.startswith(route_prefix):
+                if user_role not in allowed_roles:
+                    return JSONResponse(
+                        status_code=403,
+                        content={
+                            "detail": "Forbidden: You do not have the required role to access this resource",
+                            "code": "FORBIDDEN",
+                            "required_roles": allowed_roles,
+                            "your_role": user_role
+                        }
+                    )
+                break
+        
+        return await call_next(request)
+
+──────────────────────────────────────────────────────────────────────
+📄 app/router/__init__.py
+──────────────────────────────────────────────────────────────────────
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/router/proxy.py
+──────────────────────────────────────────────────────────────────────
+# app/router/proxy.py
+import httpx
+from fastapi import Request, APIRouter, HTTPException
+from fastapi.responses import JSONResponse
+
+from app.config import settings
+
+
+router = APIRouter()
+
+SERVICES = {
+    "auth": settings.AUTH_SERVICE_URL,
+    "profile": settings.PROFILE_SERVICE_URL,
+}
+
+INTERNAL_ONLY = {"triage"}
+
+
+async def proxy_request(service: str, path: str, request: Request):
+    """پروکسی درخواست به سرویس مقصد"""
+    
+    if service in INTERNAL_ONLY:
+        raise HTTPException(status_code=403, detail="Forbidden: Internal service only")
+    
+    if service not in SERVICES:
+        raise HTTPException(status_code=404, detail=f"Service '{service}' not found")
+    
+    target_url = f"{SERVICES[service]}/api/{service}/{path}"
+    
+    headers = dict(request.headers)
+    headers.pop("host", None)
+    
+    user_id = getattr(request.state, "user_id", None)
+    user_role = getattr(request.state, "user_role", None)
+    
+    if user_id:
+        headers["x-user-id"] = str(user_id)
+    if user_role:
+        headers["x-user-role"] = str(user_role)
+    
+    headers["x-gateway-request"] = "true"
+    
+    if path.startswith("internal/"):
+        headers["x-internal-api-key"] = settings.INTERNAL_API_KEY
+    
+    body = await request.body()
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            response = await client.request(
+                method=request.method,
+                url=target_url,
+                headers=headers,
+                params=request.query_params,
+                content=body if body else None,
+            )
+            
+            return JSONResponse(
+                content=response.json() if response.content else {},
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+            
+        except httpx.ConnectError:
+            raise HTTPException(status_code=503, detail=f"Service '{service}' unavailable")
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=504, detail=f"Timeout connecting to '{service}'")
+
+
+# ✅ مسیر Auth عمومی (بدون /api)
+@router.api_route(
+    "/auth/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+)
+async def auth_proxy(path: str, request: Request):
+    return await proxy_request("auth", path, request)
+
+
+# ✅ مسیرهای API استاندارد
+@router.api_route(
+    "/api/{service}/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+)
+async def gateway_proxy(service: str, path: str, request: Request):
+    return await proxy_request(service, path, request)
+
+
+@router.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "service": "api-gateway",
+        "version": "1.0.0",
+        "services": list(SERVICES.keys())
+    }
+
+──────────────────────────────────────────────────────────────────────
+📄 app/utils/__init__.py
+──────────────────────────────────────────────────────────────────────
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/utils/redis_client.py
+──────────────────────────────────────────────────────────────────────
+import redis
+from app.config import settings
+
+
+def get_redis_client() -> redis.Redis:
+    return redis.from_url(settings.REDIS_URL, decode_responses=True)
+
+======================================================================
+✅ پایان

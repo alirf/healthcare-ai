@@ -1,3 +1,4 @@
+# app/router/proxy.py
 import httpx
 from fastapi import Request, APIRouter, HTTPException
 from fastapi.responses import JSONResponse
@@ -12,7 +13,12 @@ SERVICES = {
     "profile": settings.PROFILE_SERVICE_URL,
 }
 
-# مسیرهایی که فقط داخلی هستند
+# ✅ مسیرهای هر سرویس
+SERVICE_PATHS = {
+    "auth": "/auth",
+    "profile": "/api/profile",
+}
+
 INTERNAL_ONLY = {"triage"}
 
 
@@ -25,13 +31,13 @@ async def proxy_request(service: str, path: str, request: Request):
     if service not in SERVICES:
         raise HTTPException(status_code=404, detail=f"Service '{service}' not found")
     
-    target_url = f"{SERVICES[service]}/api/{service}/{path}"
+    # ✅ مسیر درست بر اساس سرویس
+    base_path = SERVICE_PATHS.get(service, f"/api/{service}")
+    target_url = f"{SERVICES[service]}{base_path}/{path}"
     
-    # آماده‌سازی هدرها
     headers = dict(request.headers)
     headers.pop("host", None)
     
-    # اضافه کردن هدرهای داخلی از JWT
     user_id = getattr(request.state, "user_id", None)
     user_role = getattr(request.state, "user_role", None)
     
@@ -57,11 +63,26 @@ async def proxy_request(service: str, path: str, request: Request):
                 content=body if body else None,
             )
             
-            return JSONResponse(
-                content=response.json() if response.content else {},
+            content_type = response.headers.get("content-type", "")
+            if "application/json" in content_type:
+                response_content = response.json()
+            else:
+                response_content = {
+                    "detail": response.text or "Empty response from upstream",
+                    "upstream_status": response.status_code
+                }
+            
+            gateway_response = JSONResponse(
+                content=response_content,
                 status_code=response.status_code,
-                headers=dict(response.headers)
             )
+            
+            # کپی کردن هدرهای مهم از upstream
+            for header in ["content-type", "x-request-id"]:
+                if header in response.headers:
+                    gateway_response.headers[header] = response.headers[header]
+            
+            return gateway_response
             
         except httpx.ConnectError:
             raise HTTPException(status_code=503, detail=f"Service '{service}' unavailable")
@@ -69,6 +90,16 @@ async def proxy_request(service: str, path: str, request: Request):
             raise HTTPException(status_code=504, detail=f"Timeout connecting to '{service}'")
 
 
+# ✅ مسیر Auth عمومی (بدون /api)
+@router.api_route(
+    "/auth/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+)
+async def auth_proxy(path: str, request: Request):
+    return await proxy_request("auth", path, request)
+
+
+# ✅ مسیرهای API استاندارد
 @router.api_route(
     "/api/{service}/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]

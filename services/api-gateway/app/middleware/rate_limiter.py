@@ -1,13 +1,16 @@
+# app/middleware/rate_limiter.py
 import time
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
 from app.utils.redis_client import get_redis_client
 
 
-class RateLimiterMiddleware:
-    def __init__(self):
+class RateLimiterMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, **kwargs):
+        super().__init__(app)
         self.redis = get_redis_client()
         self.public_limit = settings.RATE_LIMIT_PUBLIC
         self.auth_limit = settings.RATE_LIMIT_AUTH
@@ -19,9 +22,6 @@ class RateLimiterMiddleware:
         return f"rate_limit:{identifier}:{current_window}"
     
     def _check_limit(self, key: str, limit: int, window: int = 60) -> tuple[bool, int, int]:
-        """
-        Returns: (allowed, remaining, reset_after)
-        """
         pipe = self.redis.pipeline()
         pipe.incr(key)
         pipe.expire(key, window)
@@ -34,7 +34,7 @@ class RateLimiterMiddleware:
         allowed = current_count <= limit
         return allowed, remaining, reset_after
     
-    async def __call__(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next):
         path = request.url.path
         
         public_paths = ["/api/auth/login", "/api/auth/register", "/api/auth/verify-otp"]
@@ -79,8 +79,6 @@ class RateLimiterMiddleware:
                 response.headers["X-RateLimit-Remaining"] = str(remaining)
                 return response
         
-
-        # مسیر AI Triage - محدودیت سخت‌گیرانه
         if path.startswith("/api/intake/") and "ai" in path:
             user_id = getattr(request.state, "user_id", None)
             if user_id:
@@ -102,7 +100,6 @@ class RateLimiterMiddleware:
                 response.headers["X-RateLimit-Remaining"] = str(remaining)
                 return response
         
-        # مسیرهای احراز هویت‌شده عادی - محدودیت user-based
         user_id = getattr(request.state, "user_id", None)
         if user_id:
             identifier = f"user:{user_id}"

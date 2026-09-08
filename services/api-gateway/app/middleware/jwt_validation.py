@@ -1,12 +1,19 @@
+# app/middleware/jwt_validation.py
 import jwt
-from fastapi import Request, HTTPException
+from fastapi import Request
 from fastapi.responses import JSONResponse
 from pathlib import Path
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
 
 
 PUBLIC_ROUTES = {
+    "/auth/login",
+    "/auth/register",
+    "/auth/verify-otp",
+    "/auth/refresh",
+    "/auth/health",
     "/api/auth/login",
     "/api/auth/register", 
     "/api/auth/verify-otp",
@@ -15,21 +22,21 @@ PUBLIC_ROUTES = {
     "/docs",
     "/openapi.json",
     "/redoc",
+    "/health",
 }
 
 
-class JWTValidationMiddleware:
-    def __init__(self):
+class JWTValidationMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, **kwargs):
+        super().__init__(app)
         self.public_key = Path(settings.PUBLIC_KEY_PATH).read_text()
     
-    async def __call__(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next):
         path = request.url.path
         
-        # مسیرهای عمومی نیاز به توکن ندارند
         if any(path.startswith(route) for route in PUBLIC_ROUTES):
             return await call_next(request)
         
-        # استخراج توکن از هدر
         auth_header = request.headers.get("authorization")
         if not auth_header:
             return JSONResponse(
@@ -53,7 +60,6 @@ class JWTValidationMiddleware:
                 options={"require": ["exp", "sub", "role"]}
             )
             
-            # اضافه کردن اطلاعات کاربر به request state
             request.state.user_id = payload.get("sub")
             request.state.user_role = payload.get("role")
             request.state.token_payload = payload

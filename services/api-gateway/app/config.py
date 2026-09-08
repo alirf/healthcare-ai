@@ -1,5 +1,10 @@
+# app/config.py
+from pathlib import Path              # ← اضافه کن
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
@@ -8,7 +13,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379"
     AUTH_SERVICE_URL: str = "http://localhost:3001"
     PROFILE_SERVICE_URL: str = "http://localhost:3002"
-    PUBLIC_KEY_PATH: str = "keys/public.pem"
+    PUBLIC_KEY_PATH: str = str(BASE_DIR / "keys" / "public.pem")
     RATE_LIMIT_PUBLIC: int = 10
     RATE_LIMIT_AUTH: int = 60
     RATE_LIMIT_AI_TRIAGE: int = 5

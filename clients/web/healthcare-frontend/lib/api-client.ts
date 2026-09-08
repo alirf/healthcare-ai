@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 
-const API_BASE_URL = process.env.API_GATEWAY_URL || "http://localhost:8000";
+const API_BASE_URL = process.env.API_GATEWAY_URL || "http://localhost:8080";
 
 async function getAuthToken(): Promise<string | undefined> {
   const cookieStore = await cookies();

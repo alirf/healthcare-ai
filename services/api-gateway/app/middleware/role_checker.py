@@ -1,27 +1,29 @@
+# app/middleware/role_checker.py
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 
-# مسیرهایی که نیاز به نقش خاص دارند
 PROTECTED_ROUTES = {
     "/api/doctor-review/": ["DOCTOR", "ADMIN"],
     "/api/prescriptions/create": ["DOCTOR", "ADMIN"],
     "/api/prescriptions/approve": ["DOCTOR", "ADMIN"],
     "/api/admin/": ["ADMIN"],
-
     "/api/profile/patient/me": ["PATIENT"],
     "/api/profile/patient/me/allergies": ["PATIENT"],
     "/api/profile/patient/me/medications": ["PATIENT"],
     "/api/profile/patient/me/conditions": ["PATIENT"],
     "/api/profile/patient/me/avatar": ["PATIENT"],
-
     "/api/profile/doctor/me": ["DOCTOR"],
     "/api/profile/doctor/me/avatar": ["DOCTOR"],
 }
 
 
-class RoleCheckerMiddleware:
-    async def __call__(self, request: Request, call_next):
+class RoleCheckerMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, **kwargs):
+        super().__init__(app)
+    
+    async def dispatch(self, request: Request, call_next):
         path = request.url.path
         user_role = getattr(request.state, "user_role", None)
         

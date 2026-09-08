@@ -1,7 +1,7 @@
-version: '3.8'
-
 services:
-  # ─── Database ─────────────────────────────────────
+  # ═══════════════════════════════════════════════════
+  # Database (Auth)
+  # ═══════════════════════════════════════════════════
   postgres:
     image: postgres:16
     container_name: healthcare-postgres
@@ -21,7 +21,31 @@ services:
     networks:
       - healthcare-network
 
-  # ─── Cache ────────────────────────────────────────
+  # ═══════════════════════════════════════════════════
+  # Database (Profile)
+  # ═══════════════════════════════════════════════════
+  profile-db:
+    image: postgres:15-alpine
+    container_name: profile-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: profile_db
+    volumes:
+      - profile-db-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d profile_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - healthcare-network
+
+  # ═══════════════════════════════════════════════════
+  # Cache
+  # ═══════════════════════════════════════════════════
   redis:
     image: redis:7-alpine
     container_name: healthcare-redis
@@ -32,16 +56,43 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    networks:
+      - healthcare-network
 
-  # ─── Auth Service ─────────────────────────────────
+  # ═══════════════════════════════════════════════════
+  # Object Storage (MinIO)
+  # ═══════════════════════════════════════════════════
+  minio:
+    image: minio/minio
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - healthcare-network
+
+  # ═══════════════════════════════════════════════════
+  # Auth Service
+  # ═══════════════════════════════════════════════════
   auth-service:
-    build: ./auth-service
+    build: ./services/auth-service
     container_name: healthcare-auth
     environment:
-      DATABASE_URL: postgres://admin:changeme@postgres:5432/auth_db
+      DATABASE_URL: postgresql://admin:changeme@postgres:5432/auth_db
       REDIS_URL: redis://redis:6379
-      PRIVATE_KEY_PATH: keys/private.pem
-      PUBLIC_KEY_PATH: keys/public.pem
+      PRIVATE_KEY_PATH: /app/keys/private.pem
+      PUBLIC_KEY_PATH: /app/keys/public.pem
     volumes:
       - ./keys:/app/keys:ro
     ports:
@@ -54,9 +105,11 @@ services:
     networks:
       - healthcare-network
 
-  # ─── API Gateway ──────────────────────────────────
+  # ═══════════════════════════════════════════════════
+  # API Gateway
+  # ═══════════════════════════════════════════════════
   api-gateway:
-    build: ./api-gateway
+    build: ./services/api-gateway
     container_name: healthcare-gateway
     environment:
       GATEWAY_PORT: 8080
@@ -64,12 +117,12 @@ services:
       REDIS_URL: redis://redis:6379
       AUTH_SERVICE_URL: http://auth-service:3001
       PROFILE_SERVICE_URL: http://profile-service:8002
-      PUBLIC_KEY_PATH: keys/public.pem
+      PUBLIC_KEY_PATH: /app/keys/public.pem
       RATE_LIMIT_PUBLIC: 10
       RATE_LIMIT_AUTH: 60
       RATE_LIMIT_AI_TRIAGE: 5
       RATE_LIMIT_PROFILE: 30
-      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:8081
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173,http://localhost:8081
     volumes:
       - ./keys:/app/keys:ro
     ports:
@@ -82,9 +135,11 @@ services:
     networks:
       - healthcare-network
 
-  # ─── User Profile Service ─────────────────────────
+  # ═══════════════════════════════════════════════════
+  # User Profile Service
+  # ═══════════════════════════════════════════════════
   profile-service:
-    build: ./user-profile-service
+    build: ./services/user-profile-service
     container_name: profile-service
     ports:
       - "3002:8002"
@@ -106,43 +161,6 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
-    networks:
-      - healthcare-network
-
-  profile-db:
-    image: postgres:15-alpine
-    container_name: profile-db
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: profile_db
-    volumes:
-      - profile-db-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d profile_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - healthcare-network
-
-  minio:
-    image: minio/minio
-    container_name: minio
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    volumes:
-      - minio-data:/data
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
     networks:
       - healthcare-network
 

@@ -80,7 +80,7 @@ npm run dev
 | آدرس | توضیح |
 |------|-------|
 | `http://localhost:3000/dashboard` | داشبورد اصلی |
-| `http://localhost:3000/login` | صفحه ورود (در حال ساخت) |
+| `http://localhost:3000/login` | صفحه ورود |
 
 ---
 
