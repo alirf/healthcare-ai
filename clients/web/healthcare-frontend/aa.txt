@@ -1,10 +1,10 @@
 ======================================================================
 📁 پوشه مبدا: D:\med\healthcare-ai\clients\web\healthcare-frontend
-📊 تعداد فایل‌های جمع‌آوری شده: 41
+📊 تعداد فایل‌های جمع‌آوری شده: 47
 ❌ تعداد خطاها: 0
-📁 پوشه‌های رد شده: coverage, static, .output, env, .nuxt, target, .env, __pycache__, .idea, .vscode, public, venv, build, .git, .next, node_modules, assets, out, .venv, dist
+📁 پوشه‌های رد شده: .git, __pycache__, dist, coverage, .idea, .nuxt, node_modules, .env, .venv, .next, static, .output, venv, out, build, target, public, assets, env, .vscode
 ======================================================================
-⚡ فقط پسوندهای: .ts, .java, .tsx, .py
+⚡ فقط پسوندهای: .java, .ts, .tsx, .py
 ======================================================================
 
 
@@ -1210,6 +1210,385 @@ export default function DashboardPage() {
         </div>
       </div>
     </Suspense>
+  );
+}
+
+──────────────────────────────────────────────────────────────────────
+📄 app/dashboard/records/page.tsx
+──────────────────────────────────────────────────────────────────────
+"use client";
+
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  FileText,
+  Plus,
+  Stethoscope,
+  FlaskConical,
+  Image,
+  ClipboardList,
+  LayoutGrid,
+  ChevronRight,
+  ChevronLeft,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+import RecordCard from "@/components/records/RecordCard";
+import RecordSummary from "@/components/records/RecordSummary";
+import RecentActivity from "@/components/records/RecentActivity";
+import HealthTips from "@/components/records/HealthTips";
+import type { MedicalRecord, RecordSummary as RecordSummaryType, RecordActivity } from "@/types/records";
+
+// ==================== FILTER TABS ====================
+type FilterTab = "all" | "visit" | "test" | "image" | "note";
+
+const filterTabs: { key: FilterTab; label: string; icon: string }[] = [
+  { key: "all", label: "همه", icon: "LayoutGrid" },
+  { key: "visit", label: "ویزیت‌ها", icon: "Stethoscope" },
+  { key: "test", label: "آزمایش‌ها", icon: "FlaskConical" },
+  { key: "image", label: "تصاویر", icon: "Image" },
+  { key: "note", label: "یادداشت‌ها", icon: "ClipboardList" },
+];
+
+// ==================== MOCK DATA ====================
+
+const mockRecords: MedicalRecord[] = [
+  {
+    id: "r1",
+    type: "visit",
+    title: "ویزیت آنلاین",
+    subtitle: "دکتر سارا یوسفی",
+    description: "متخصص داخلی\nعلائم: تب، گلودرد، سرفه\nتشخیص: احتمال عفونت ویروسی",
+    doctorName: "سارا یوسفی",
+    date: "2026-09-05T14:30:00Z",
+    status: "completed",
+    statusLabel: "تکمیل شده",
+    icon: "Stethoscope",
+    iconColor: "text-trust-500",
+    bgColor: "bg-trust-50 dark:bg-trust-900/20",
+    borderColor: "border-trust-200 dark:border-trust-800",
+    tags: ["تب", "گلودرد"],
+  },
+  {
+    id: "r2",
+    type: "test",
+    title: "آزمایش خون",
+    subtitle: "آزمایشگاه امید",
+    description: "شامل: CBC، قند خون، چربی خون\nنتیجه: قند خون مرزی - نیاز به پیگیری",
+    clinicName: "آزمایشگاه امید",
+    date: "2026-09-01T09:00:00Z",
+    status: "reviewed",
+    statusLabel: "بررسی شده",
+    icon: "FlaskConical",
+    iconColor: "text-amber-500",
+    bgColor: "bg-amber-50 dark:bg-amber-900/20",
+    borderColor: "border-amber-200 dark:border-amber-800",
+    tags: ["CBC", "قند خون"],
+  },
+  {
+    id: "r3",
+    type: "visit",
+    title: "ویزیت قلب و عروق",
+    subtitle: "دکتر علی محمدی",
+    description: "فوق تخصص قلب\nعلائم: درد سینه، تنگی نفس\nتشخیص: آنژین صدری - نیاز به آنژیوگرافی",
+    doctorName: "علی محمدی",
+    date: "2026-08-28T11:00:00Z",
+    status: "completed",
+    statusLabel: "تکمیل شده",
+    icon: "Stethoscope",
+    iconColor: "text-trust-500",
+    bgColor: "bg-trust-50 dark:bg-trust-900/20",
+    borderColor: "border-trust-200 dark:border-trust-800",
+    tags: ["قلب", "آنژین"],
+  },
+  {
+    id: "r4",
+    type: "image",
+    title: "رادیوگرافی قفسه سینه",
+    subtitle: "مرکز تصویربرداری نور",
+    description: "PA view\nنتیجه: ریه‌ها طبیعی - قلب اندکی بزرگ",
+    clinicName: "مرکز تصویربرداری نور",
+    date: "2026-08-25T16:00:00Z",
+    status: "reviewed",
+    statusLabel: "بررسی شده",
+    icon: "Image",
+    iconColor: "text-violet-500",
+    bgColor: "bg-violet-50 dark:bg-violet-900/20",
+    borderColor: "border-violet-200 dark:border-violet-800",
+    tags: ["رادیوگرافی", "قفسه سینه"],
+  },
+  {
+    id: "r5",
+    type: "note",
+    title: "یادداشت شخصی",
+    subtitle: "ثبت شده توسط بیمار",
+    description: "از دیروز سردرد دارم و داروی استامینوفن مصرف کردم.\nتب ندارم ولی احساس خستگی شدید دارم.",
+    date: "2026-08-20T20:00:00Z",
+    status: "pending",
+    statusLabel: "در انتظار",
+    icon: "FileText",
+    iconColor: "text-healing-500",
+    bgColor: "bg-healing-50 dark:bg-healing-900/20",
+    borderColor: "border-healing-200 dark:border-healing-800",
+    tags: ["سردرد", "خستگی"],
+  },
+  {
+    id: "r6",
+    type: "test",
+    title: "آزمایش ادرار",
+    subtitle: "آزمایشگاه پارس",
+    description: "UA & Culture\nنتیجه: عفونت ادراری - آنتی‌بیوتیک تجویز شد",
+    clinicName: "آزمایشگاه پارس",
+    date: "2026-08-15T10:30:00Z",
+    status: "completed",
+    statusLabel: "تکمیل شده",
+    icon: "FlaskConical",
+    iconColor: "text-amber-500",
+    bgColor: "bg-amber-50 dark:bg-amber-900/20",
+    borderColor: "border-amber-200 dark:border-amber-800",
+    tags: ["ادرار", "عفونت"],
+  },
+];
+
+const mockSummary: RecordSummaryType = {
+  totalRecords: 25,
+  totalVisits: 12,
+  totalTests: 8,
+  totalImages: 3,
+  totalNotes: 2,
+  lastUpdated: "2026-09-07T10:00:00Z",
+};
+
+const mockActivities: RecordActivity[] = [
+  {
+    id: "a1",
+    title: "ویزیت آنلاین جدید",
+    description: "دکتر سارا یوسفی - ویزیت تکمیل شد",
+    date: "2026-09-05T14:30:00Z",
+    icon: "Stethoscope",
+    iconColor: "text-trust-500",
+    bgColor: "bg-trust-50 dark:bg-trust-900/20",
+  },
+  {
+    id: "a2",
+    title: "آزمایش خون",
+    description: "نتایج آزمایشگاه امید آماده شد",
+    date: "2026-09-01T09:00:00Z",
+    icon: "FlaskConical",
+    iconColor: "text-amber-500",
+    bgColor: "bg-amber-50 dark:bg-amber-900/20",
+  },
+  {
+    id: "a3",
+    title: "رادیوگرافی قفسه سینه",
+    description: "تصاویر از مرکز نور دریافت شد",
+    date: "2026-08-25T16:00:00Z",
+    icon: "Image",
+    iconColor: "text-violet-500",
+    bgColor: "bg-violet-50 dark:bg-violet-900/20",
+  },
+  {
+    id: "a4",
+    title: "یادداشت جدید",
+    description: "ثبت علائم روزانه - سردرد و خستگی",
+    date: "2026-08-20T20:00:00Z",
+    icon: "FileText",
+    iconColor: "text-healing-500",
+    bgColor: "bg-healing-50 dark:bg-healing-900/20",
+  },
+];
+
+// ==================== PAGINATION ====================
+const ITEMS_PER_PAGE = 6;
+
+export default function RecordsPage() {
+  const [activeFilter, setActiveFilter] = useState<FilterTab>("all");
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const filteredRecords =
+    activeFilter === "all"
+      ? mockRecords
+      : mockRecords.filter((r) => r.type === activeFilter);
+
+  const totalPages = Math.ceil(filteredRecords.length / ITEMS_PER_PAGE);
+  const paginatedRecords = filteredRecords.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  );
+
+  const handleFilterChange = (filter: FilterTab) => {
+    setActiveFilter(filter);
+    setCurrentPage(1);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* ===== MAIN COLUMN (Larger - Right side in RTL) ===== */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+
+        {/* LEFT COLUMN (Main Content) - takes 2/3 on xl */}
+        <div className="xl:col-span-2 space-y-6">
+          {/* Header Section */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <Card className="overflow-hidden border-trust-200 dark:border-trust-800/30">
+              <CardContent className="p-5">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  {/* Title */}
+                  <div className="flex items-center gap-2">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-trust-500 to-healing-500 flex items-center justify-center shadow-md shadow-trust-500/20">
+                      <FileText className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h1 className="text-lg font-bold text-foreground">پرونده‌های پزشکی</h1>
+                      <p className="text-xs text-muted-foreground">
+                        مدیریت و مشاهده تمام سوابق پزشکی شما
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* New Record Button */}
+                  <Button
+                    className="bg-gradient-to-r from-trust-500 to-healing-500 hover:from-trust-600 hover:to-healing-600 text-white shadow-lg shadow-trust-500/25 h-10 gap-1.5"
+                  >
+                    <Plus className="w-4 h-4" />
+                    پرونده جدید
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          {/* Filter Tabs */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.1 }}
+            className="flex flex-wrap gap-2"
+          >
+            {filterTabs.map((tab) => {
+              const isActive = activeFilter === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => handleFilterChange(tab.key)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200",
+                    isActive
+                      ? "bg-trust-500 text-white shadow-md shadow-trust-500/20"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                  )}
+                >
+                  {tab.label}
+                  {isActive && (
+                    <motion.div
+                      layoutId="filterIndicator"
+                      className="w-1.5 h-1.5 rounded-full bg-white"
+                    />
+                  )}
+                </button>
+              );
+            })}
+          </motion.div>
+
+          {/* Records List */}
+          <div className="space-y-3">
+            <AnimatePresence mode="wait">
+              {paginatedRecords.map((record, index) => (
+                <RecordCard key={record.id} record={record} index={index} />
+              ))}
+            </AnimatePresence>
+
+            {paginatedRecords.length === 0 && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="text-center py-12"
+              >
+                <FileText className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
+                <p className="text-muted-foreground">پرونده‌ای یافت نشد</p>
+              </motion.div>
+            )}
+          </div>
+
+          {/* Pagination */}
+          {filteredRecords.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
+              className="flex items-center justify-between pt-2"
+            >
+              <p className="text-sm text-muted-foreground">
+                نمایش{" "}
+                <span className="font-medium text-foreground">
+                  {Math.min(paginatedRecords.length, ITEMS_PER_PAGE).toLocaleString("fa-IR")}
+                </span>{" "}
+                مورد از{" "}
+                <span className="font-medium text-foreground">
+                  {filteredRecords.length.toLocaleString("fa-IR")}
+                </span>
+              </p>
+
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="w-8 h-8"
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .reverse()
+                  .map((page) => (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      className={cn(
+                        "w-8 h-8 rounded-lg text-sm font-medium transition-all",
+                        currentPage === page
+                          ? "bg-trust-500 text-white shadow-sm"
+                          : "text-muted-foreground hover:bg-muted"
+                      )}
+                    >
+                      {page.toLocaleString("fa-IR")}
+                    </button>
+                  ))}
+
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="w-8 h-8"
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+              </div>
+            </motion.div>
+          )}
+        </div>
+
+        {/* RIGHT COLUMN (Widgets) - takes 1/3 on xl */}
+        <div className="space-y-4">
+          {/* Record Summary */}
+          <RecordSummary summary={mockSummary} />
+
+          {/* Recent Activity */}
+          <RecentActivity activities={mockActivities} />
+
+          {/* Health Tips */}
+          <HealthTips />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2823,6 +3202,439 @@ export default function Sidebar() {
 
 
 ──────────────────────────────────────────────────────────────────────
+📄 components/records/HealthTips.tsx
+──────────────────────────────────────────────────────────────────────
+"use client";
+
+import { motion } from "framer-motion";
+import { Lightbulb, ChevronLeft, Heart, ShieldCheck } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+
+export default function HealthTips() {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.4 }}
+    >
+      <Card className="overflow-hidden border-amber-200 dark:border-amber-800/30">
+        <CardContent className="p-5 relative">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full blur-2xl -translate-y-1/2 translate-x-1/4" />
+
+          <div className="relative z-10 space-y-4">
+            {/* Header with decorative icon */}
+            <div className="flex items-start gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-400 flex items-center justify-center shadow-lg shadow-amber-500/20 shrink-0">
+                <Heart className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-foreground leading-tight">
+                  همیشه پرونده‌هات رو بروز نگه دار
+                </h3>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                  با ثبت منظم اطلاعات، تشخیص دقیق‌تر و درمان بهتری داشته باشی
+                </p>
+              </div>
+            </div>
+
+            {/* Decorative illustration placeholder */}
+            <div className="flex justify-center py-2">
+              <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-healing-100 to-trust-100 dark:from-healing-900/30 dark:to-trust-900/30 flex items-center justify-center">
+                <ShieldCheck className="w-12 h-12 text-healing-500/60" />
+              </div>
+            </div>
+
+            {/* CTA Button */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full h-9 text-xs border-amber-200 hover:bg-amber-50 hover:text-amber-600 dark:border-amber-800 dark:hover:bg-amber-900/20 gap-1"
+            >
+              <Lightbulb className="w-3.5 h-3.5" />
+              مشاهده نکات مهم
+              <ChevronLeft className="w-3.5 h-3.5 mr-auto" />
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
+──────────────────────────────────────────────────────────────────────
+📄 components/records/RecentActivity.tsx
+──────────────────────────────────────────────────────────────────────
+"use client";
+
+import { motion } from "framer-motion";
+import {
+  Clock,
+  Stethoscope,
+  FlaskConical,
+  FileText,
+  Image,
+  ChevronLeft,
+} from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { cn, formatRelativeTime } from "@/lib/utils";
+import type { RecordActivity } from "@/types/records";
+
+interface RecentActivityProps {
+  activities: RecordActivity[];
+}
+
+const iconMap = {
+  Stethoscope,
+  FlaskConical,
+  FileText,
+  Image,
+};
+
+export default function RecentActivity({ activities }: RecentActivityProps) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.3 }}
+    >
+      <Card className="overflow-hidden border-healing-200 dark:border-healing-800/30">
+        <CardContent className="p-5 relative">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-healing-500/5 rounded-full blur-2xl -translate-y-1/2 translate-x-1/4" />
+
+          <div className="relative z-10 space-y-3">
+            {/* Header */}
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-healing-100 dark:bg-healing-900/30 flex items-center justify-center">
+                <Clock className="w-4 h-4 text-healing-500" />
+              </div>
+              <span className="font-bold text-sm text-foreground">آخرین فعالیت‌ها</span>
+            </div>
+
+            {/* Activity Items */}
+            <div className="space-y-2">
+              {activities.map((activity, index) => {
+                const Icon = iconMap[activity.icon as keyof typeof iconMap] || FileText;
+                return (
+                  <motion.div
+                    key={activity.id}
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.3, delay: 0.1 * index }}
+                    className={cn(
+                      "flex items-center gap-3 p-3 rounded-xl transition-colors hover:bg-muted/50 cursor-pointer group",
+                      activity.bgColor
+                    )}
+                  >
+                    <div className="w-9 h-9 rounded-lg bg-white/60 dark:bg-white/10 flex items-center justify-center shrink-0">
+                      <Icon className={cn("w-4 h-4", activity.iconColor)} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{activity.title}</p>
+                      <p className="text-xs text-muted-foreground truncate">{activity.description}</p>
+                      <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                        {formatRelativeTime(activity.date)}
+                      </p>
+                    </div>
+                    <ChevronLeft className="w-4 h-4 text-muted-foreground/50 group-hover:text-trust-500 transition-colors shrink-0" />
+                  </motion.div>
+                );
+              })}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
+──────────────────────────────────────────────────────────────────────
+📄 components/records/RecordCard.tsx
+──────────────────────────────────────────────────────────────────────
+"use client";
+
+import { motion } from "framer-motion";
+import {
+  Stethoscope,
+  FlaskConical,
+  Image,
+  FileText,
+  ChevronLeft,
+  CalendarDays,
+  CheckCircle2,
+  Clock,
+  AlertCircle,
+} from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { cn } from "@/lib/utils";
+import type { MedicalRecord } from "@/types/records";
+
+const iconMap = {
+  Stethoscope,
+  FlaskConical,
+  Image,
+  FileText,
+};
+
+const statusConfig = {
+  completed: { icon: CheckCircle2, color: "text-healing-500", bg: "bg-healing-50 dark:bg-healing-900/20", label: "تکمیل شده" },
+  pending: { icon: Clock, color: "text-amber-500", bg: "bg-amber-50 dark:bg-amber-900/20", label: "در انتظار" },
+  in_progress: { icon: AlertCircle, color: "text-trust-500", bg: "bg-trust-50 dark:bg-trust-900/20", label: "در حال بررسی" },
+  reviewed: { icon: CheckCircle2, color: "text-violet-500", bg: "bg-violet-50 dark:bg-violet-900/20", label: "بررسی شده" },
+};
+
+interface RecordCardProps {
+  record: MedicalRecord;
+  index: number;
+}
+
+export default function RecordCard({ record, index }: RecordCardProps) {
+  const Icon = iconMap[record.icon as keyof typeof iconMap] || FileText;
+  const status = statusConfig[record.status];
+  const StatusIcon = status.icon;
+
+  const getInitials = (name: string) => {
+    return name.split(" ").map((n) => n[0]).join("").slice(0, 2);
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay: 0.05 * index }}
+    >
+      <Card
+        className={cn(
+          "group relative overflow-hidden p-5 transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5 border",
+          record.borderColor
+        )}
+      >
+        <div className="flex items-start gap-4">
+          {/* Right side: Icon + Avatar */}
+          <div className="flex flex-col items-center gap-2 shrink-0">
+            {/* Record Type Icon */}
+            <div
+              className={cn(
+                "w-11 h-11 rounded-xl flex items-center justify-center",
+                record.bgColor
+              )}
+            >
+              <Icon className={cn("w-5 h-5", record.iconColor)} />
+            </div>
+
+            {/* Doctor/Clinic Avatar */}
+            <Avatar className="w-10 h-10 ring-2 ring-white dark:ring-slate-800 shadow-sm">
+              <AvatarImage src={record.doctorAvatar} />
+              <AvatarFallback
+                className={cn(
+                  "text-xs font-bold text-white",
+                  record.type === "visit" ? "bg-gradient-to-br from-trust-500 to-healing-500" :
+                  record.type === "test" ? "bg-gradient-to-br from-amber-500 to-orange-500" :
+                  record.type === "image" ? "bg-gradient-to-br from-violet-500 to-purple-500" :
+                  "bg-gradient-to-br from-slate-500 to-slate-600"
+                )}
+              >
+                {getInitials(record.doctorName || record.clinicName || "?")}
+              </AvatarFallback>
+            </Avatar>
+          </div>
+
+          {/* Middle: Content */}
+          <div className="flex-1 min-w-0 space-y-2">
+            {/* Title & Doctor */}
+            <div>
+              <h3 className="font-bold text-sm text-foreground leading-tight">
+                {record.title}
+              </h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {record.subtitle}
+              </p>
+            </div>
+
+            {/* Description */}
+            <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
+              {record.description}
+            </p>
+
+            {/* Tags */}
+            {record.tags && record.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {record.tags.map((tag, i) => (
+                  <Badge
+                    key={i}
+                    variant="outline"
+                    className="text-[10px] h-5 px-1.5 border-trust-200 dark:border-trust-800 text-trust-600 dark:text-trust-400"
+                  >
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Left side: Date & Action */}
+          <div className="flex flex-col items-end gap-3 shrink-0">
+            {/* Date */}
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <CalendarDays className="w-3.5 h-3.5" />
+              <span>{new Date(record.date).toLocaleDateString("fa-IR")}</span>
+            </div>
+
+            {/* Status Badge */}
+            <div className={cn("flex items-center gap-1 text-[10px] px-2 py-1 rounded-full", status.bg, status.color)}>
+              <StatusIcon className="w-3 h-3" />
+              <span>{status.label}</span>
+            </div>
+
+            {/* View Button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 text-xs text-trust-500 hover:text-trust-600 hover:bg-trust-50 dark:hover:bg-trust-900/20 gap-1 px-2"
+            >
+              مشاهده
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </div>
+      </Card>
+    </motion.div>
+  );
+}
+
+──────────────────────────────────────────────────────────────────────
+📄 components/records/RecordSummary.tsx
+──────────────────────────────────────────────────────────────────────
+"use client";
+
+import { motion } from "framer-motion";
+import {
+  FileText,
+  Stethoscope,
+  FlaskConical,
+  Image,
+  ClipboardList,
+  TrendingUp,
+  Activity,
+} from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+import type { RecordSummary as RecordSummaryType } from "@/types/records";
+
+interface RecordSummaryProps {
+  summary: RecordSummaryType;
+}
+
+const stats = [
+  {
+    key: "totalVisits",
+    label: "ویزیت‌ها",
+    icon: Stethoscope,
+    color: "text-trust-500",
+    bgColor: "bg-trust-50 dark:bg-trust-900/20",
+    borderColor: "border-trust-200 dark:border-trust-800",
+  },
+  {
+    key: "totalTests",
+    label: "آزمایش‌ها",
+    icon: FlaskConical,
+    color: "text-amber-500",
+    bgColor: "bg-amber-50 dark:bg-amber-900/20",
+    borderColor: "border-amber-200 dark:border-amber-800",
+  },
+  {
+    key: "totalImages",
+    label: "تصاویر",
+    icon: Image,
+    color: "text-violet-500",
+    bgColor: "bg-violet-50 dark:bg-violet-900/20",
+    borderColor: "border-violet-200 dark:border-violet-800",
+  },
+  {
+    key: "totalNotes",
+    label: "یادداشت‌ها",
+    icon: ClipboardList,
+    color: "text-healing-500",
+    bgColor: "bg-healing-50 dark:bg-healing-900/20",
+    borderColor: "border-healing-200 dark:border-healing-800",
+  },
+];
+
+export default function RecordSummary({ summary }: RecordSummaryProps) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.2 }}
+    >
+      <Card className="overflow-hidden border-trust-200 dark:border-trust-800/30">
+        <CardContent className="p-5 relative">
+          {/* Background decoration */}
+          <div className="absolute top-0 right-0 w-32 h-32 bg-trust-500/5 rounded-full blur-2xl -translate-y-1/2 translate-x-1/4" />
+
+          <div className="relative z-10 space-y-4">
+            {/* Header */}
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-trust-100 dark:bg-trust-900/30 flex items-center justify-center">
+                <FileText className="w-4 h-4 text-trust-500" />
+              </div>
+              <span className="font-bold text-sm text-foreground">خلاصه پرونده‌ها</span>
+            </div>
+
+            {/* Total Records */}
+            <div className="flex items-baseline gap-1">
+              <span className="text-2xl font-bold text-foreground tracking-tight">
+                {summary.totalRecords.toLocaleString("fa-IR")}
+              </span>
+              <span className="text-sm text-muted-foreground">پرونده</span>
+            </div>
+
+            {/* Stats Grid */}
+            <div className="grid grid-cols-2 gap-2">
+              {stats.map((stat, index) => {
+                const Icon = stat.icon;
+                const value = summary[stat.key as keyof RecordSummaryType] as number;
+                return (
+                  <motion.div
+                    key={stat.key}
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.3, delay: 0.1 * index }}
+                    className={cn(
+                      "flex flex-col items-center p-3 rounded-xl border",
+                      stat.bgColor,
+                      stat.borderColor
+                    )}
+                  >
+                    <Icon className={cn("w-4 h-4 mb-1", stat.color)} />
+                    <span className={cn("text-lg font-bold", stat.color)}>
+                      {value.toLocaleString("fa-IR")}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">{stat.label}</span>
+                  </motion.div>
+                );
+              })}
+            </div>
+
+            {/* Last Updated */}
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground pt-1">
+              <Activity className="w-3.5 h-3.5 text-healing-500" />
+              <span>آخرین بروزرسانی:</span>
+              <span className="font-medium text-foreground">
+                {new Date(summary.lastUpdated).toLocaleDateString("fa-IR")}
+              </span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
+──────────────────────────────────────────────────────────────────────
 📄 components/ui/avatar.tsx
 ──────────────────────────────────────────────────────────────────────
 "use client";
@@ -3999,6 +4811,54 @@ export interface NotificationItem {
   isRead: boolean;
   createdAt: string;
   link?: string;
+}
+
+──────────────────────────────────────────────────────────────────────
+📄 types/records.ts
+──────────────────────────────────────────────────────────────────────
+"use client";
+
+// ==================== MEDICAL RECORD TYPES ====================
+
+export type RecordType = "visit" | "test" | "image" | "note";
+export type RecordStatus = "completed" | "pending" | "in_progress" | "reviewed";
+
+export interface MedicalRecord {
+  id: string;
+  type: RecordType;
+  title: string;
+  subtitle: string;
+  description: string;
+  doctorName?: string;
+  doctorAvatar?: string;
+  clinicName?: string;
+  date: string;
+  status: RecordStatus;
+  statusLabel: string;
+  icon: string;
+  iconColor: string;
+  bgColor: string;
+  borderColor: string;
+  tags?: string[];
+}
+
+export interface RecordSummary {
+  totalRecords: number;
+  totalVisits: number;
+  totalTests: number;
+  totalImages: number;
+  totalNotes: number;
+  lastUpdated: string;
+}
+
+export interface RecordActivity {
+  id: string;
+  title: string;
+  description: string;
+  date: string;
+  icon: string;
+  iconColor: string;
+  bgColor: string;
 }
 
 ======================================================================
