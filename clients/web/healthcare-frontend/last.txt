@@ -1,10 +1,10 @@
 ======================================================================
 📁 پوشه مبدا: D:\med\healthcare-ai\clients\web\healthcare-frontend
-📊 تعداد فایل‌های جمع‌آوری شده: 47
+📊 تعداد فایل‌های جمع‌آوری شده: 59
 ❌ تعداد خطاها: 0
-📁 پوشه‌های رد شده: .git, __pycache__, dist, coverage, .idea, .nuxt, node_modules, .env, .venv, .next, static, .output, venv, out, build, target, public, assets, env, .vscode
+📁 پوشه‌های رد شده: env, .venv, .env, node_modules, coverage, out, .next, static, target, .idea, public, build, .nuxt, .vscode, dist, assets, venv, .output, __pycache__, .git
 ======================================================================
-⚡ فقط پسوندهای: .java, .ts, .tsx, .py
+⚡ فقط پسوندهای: .tsx, .py, .java, .ts
 ======================================================================
 
 
@@ -1587,6 +1587,109 @@ export default function RecordsPage() {
           {/* Health Tips */}
           <HealthTips />
         </div>
+      </div>
+    </div>
+  );
+}
+
+──────────────────────────────────────────────────────────────────────
+📄 app/dashboard/visit/layout.tsx
+──────────────────────────────────────────────────────────────────────
+import { redirect } from "next/navigation";
+import { isAuthenticated } from "@/lib/auth";
+import Header from "@/components/layout/Header";
+import Sidebar from "@/components/layout/Sidebar";
+import MobileNav from "@/components/layout/MobileNav";
+
+export default async function VisitLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const authenticated = await isAuthenticated();
+  
+  if (!authenticated) {
+    redirect("/login");
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col bg-background">
+      <Header />
+      <div className="flex flex-1 pt-[60px]">
+        <Sidebar />
+        <main className="flex-1 transition-all duration-300 h-[calc(100vh-60px)] overflow-hidden lg:pr-[280px]">
+          {children}
+        </main>
+      </div>
+      <MobileNav />
+    </div>
+  );
+}
+
+──────────────────────────────────────────────────────────────────────
+📄 app/dashboard/visit/page.tsx
+──────────────────────────────────────────────────────────────────────
+"use client";
+
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useSidebarStore } from "@/stores/sidebar-store";
+import { Stethoscope, Menu } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import SymptomChat from "@/components/visit/SymptomChat";
+import VisitSidebar from "@/components/visit/VisitSidebar";
+import { mockVisitHistory } from "@/components/visit/SymptomTemplates";
+import type { VisitHistory } from "@/types/visit";
+
+export default function VisitPage() {
+  const { isOpen, isCollapsed, open, setCollapsed } = useSidebarStore();
+  const [selectedVisit, setSelectedVisit] = useState<VisitHistory | undefined>();
+  const [showVisitList, setShowVisitList] = useState(true);
+
+  const handleNewVisit = () => {
+    setSelectedVisit(undefined);
+    // Reset chat state would go here
+  };
+
+  return (
+    <div className="h-full flex">
+      {/* Visit Sidebar (Left side in RTL) */}
+      <AnimatePresence>
+        {showVisitList && (
+          <motion.div
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 320, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+            className="shrink-0 h-full border-l border-border overflow-hidden"
+          >
+            <VisitSidebar
+              visits={mockVisitHistory}
+              selectedVisitId={selectedVisit?.id}
+              onSelectVisit={setSelectedVisit}
+              onNewVisit={handleNewVisit}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col h-full relative">
+        {/* Toggle Visit List Button */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setShowVisitList(!showVisitList)}
+          className={cn(
+            "absolute top-3 z-10 w-8 h-8 rounded-lg border shadow-sm bg-card",
+            showVisitList ? "left-3" : "right-3"
+          )}
+        >
+          <Menu className="w-4 h-4" />
+        </Button>
+
+        <SymptomChat onSendToDoctor={() => console.log("Sending to doctor...")} />
       </div>
     </div>
   );
@@ -3796,6 +3899,33 @@ CardFooter.displayName = "CardFooter";
 export { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter };
 
 ──────────────────────────────────────────────────────────────────────
+📄 components/ui/input.tsx
+──────────────────────────────────────────────────────────────────────
+"use client";
+
+import * as React from "react";
+import { cn } from "@/lib/utils";
+
+const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  ({ className, type, ...props }, ref) => {
+    return (
+      <input
+        type={type}
+        className={cn(
+          "flex h-9 w-full rounded-lg border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+          className
+        )}
+        ref={ref}
+        {...props}
+      />
+    );
+  }
+);
+Input.displayName = "Input";
+
+export { Input };
+
+──────────────────────────────────────────────────────────────────────
 📄 components/ui/progress.tsx
 ──────────────────────────────────────────────────────────────────────
 "use client"
@@ -3908,6 +4038,1748 @@ function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>)
 }
 
 export { Skeleton };
+
+──────────────────────────────────────────────────────────────────────
+📄 components/visit/BodyAnatomy.tsx
+──────────────────────────────────────────────────────────────────────
+"use client";
+
+import { useState } from "react";
+import { motion } from "framer-motion";
+import { Check, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { bodyParts } from "./SymptomTemplates";
+import { cn } from "@/lib/utils";
+
+interface BodyAnatomyProps {
+  selectedParts: string[];
+  onPartsChange: (parts: string[]) => void;
+  onComplete: () => void;
+  onCancel: () => void;
+  title?: string;
+}
+
+export default function BodyAnatomy({
+  selectedParts,
+  onPartsChange,
+  onComplete,
+  onCancel,
+  title = "بخش‌های مورد نظر را انتخاب کنید",
+}: BodyAnatomyProps) {
+  const [localParts, setLocalParts] = useState<string[]>(selectedParts);
+
+  const togglePart = (partId: string) => {
+    setLocalParts((prev) =>
+      prev.includes(partId) ? prev.filter((p) => p !== partId) : [...prev, partId]
+    );
+  };
+
+  const handleComplete = () => {
+    onPartsChange(localParts);
+    onComplete();
+  };
+
+  // SVG Body Silhouette
+  const BodySVG = () => (
+    <svg viewBox="0 0 100 100" className="w-full h-full">
+      {/* Head */}
+      <ellipse
+        cx="50" cy="8" rx="8" ry="10"
+        className={cn(
+          "transition-all duration-200 cursor-pointer hover:opacity-80",
+          localParts.includes("head") ? "fill-rose-400" : "fill-slate-300 dark:fill-slate-600"
+        )}
+        onClick={() => togglePart("head")}
+      />
+      {/* Neck */}
+      <rect
+        x="46" y="16" width="8" height="6" rx="2"
+        className={cn(
+          "transition-all duration-200 cursor-pointer hover:opacity-80",
+          localParts.includes("neck") ? "fill-rose-400" : "fill-slate-300 dark:fill-slate-600"
+        )}
+        onClick={() => togglePart("neck")}
+      />
+      {/* Shoulders/Chest */}
+      <rect
+        x="32" y="22" width="36" height="8" rx="4"
+        className={cn(
+          "transition-all duration-200 cursor-pointer hover:opacity-80",
+          localParts.includes("shoulders") ? "fill-rose-400" : "fill-slate-300 dark:fill-slate-600"
+        )}
+        onClick={() => togglePart("shoulders")}
+      />
+      {/* Chest */}
+      <rect
+        x="36" y="30" width="28" height="14" rx="6"
+        className={cn(
+          "transition-all duration-200 cursor-pointer hover:opacity-80",
+          localParts.includes("chest") ? "fill-rose-400" : "fill-slate-300 dark:fill-slate-600"
+        )}
+        onClick={() => togglePart("chest")}
+      />
+      {/* Abdomen */}
+      <rect
+        x="38" y="44" width="24" height="12" rx="6"
+        className={cn(
+          "transition-all duration-200 cursor-pointer hover:opacity-80",
+          localParts.includes("abdomen") ? "fill-rose-400" : "fill-slate-300 dark:fill-slate-600"
+        )}
+        onClick={() => togglePart("abdomen")}
+      />
+      {/* Back (shown as outline behind) */}
+      <rect
+        x="38" y="34" width="24" height="16" rx="4"
+        className={cn(
+          "transition-all duration-200 cursor-pointer hover:opacity-80 opacity-50",
+          localParts.includes("back") ? "fill-rose-400" : "fill-slate-300 dark:fill-slate-600"
+        )}
+        onClick={() => togglePart("back")}
+      />
+      {/* Left Arm */}
+      <rect
+        x="22" y="30" width="10" height="26" rx="5"
+        className={cn(
+          "transition-all duration-200 cursor-pointer hover:opacity-80",
+          localParts.includes("left_arm") ? "fill-rose-400" : "fill-slate-300 dark:fill-slate-600"
+        )}
+        onClick={() => togglePart("left_arm")}
+      />
+      {/* Right Arm */}
+      <rect
+        x="68" y="30" width="10" height="26" rx="5"
+        className={cn(
+          "transition-all duration-200 cursor-pointer hover:opacity-80",
+          localParts.includes("right_arm") ? "fill-rose-400" : "fill-slate-300 dark:fill-slate-600"
+        )}
+        onClick={() => togglePart("right_arm")}
+      />
+      {/* Left Hand */}
+      <circle
+        cx="19" cy="60" r="5"
+        className={cn(
+          "transition-all duration-200 cursor-pointer hover:opacity-80",
+          localParts.includes("left_hand") ? "fill-rose-400" : "fill-slate-300 dark:fill-slate-600"
+        )}
+        onClick={() => togglePart("left_hand")}
+      />
+      {/* Right Hand */}
+      <circle
+        cx="81" cy="60" r="5"
+        className={cn(
+          "transition-all duration-200 cursor-pointer hover:opacity-80",
+          localParts.includes("right_hand") ? "fill-rose-400" : "fill-slate-300 dark:fill-slate-600"
+        )}
+        onClick={() => togglePart("right_hand")}
+      />
+      {/* Left Leg */}
+      <rect
+        x="38" y="56" width="12" height="32" rx="6"
+        className={cn(
+          "transition-all duration-200 cursor-pointer hover:opacity-80",
+          localParts.includes("left_leg") ? "fill-rose-400" : "fill-slate-300 dark:fill-slate-600"
+        )}
+        onClick={() => togglePart("left_leg")}
+      />
+      {/* Right Leg */}
+      <rect
+        x="50" y="56" width="12" height="32" rx="6"
+        className={cn(
+          "transition-all duration-200 cursor-pointer hover:opacity-80",
+          localParts.includes("right_leg") ? "fill-rose-400" : "fill-slate-300 dark:fill-slate-600"
+        )}
+        onClick={() => togglePart("right_leg")}
+      />
+      {/* Left Foot */}
+      <ellipse
+        cx="36" cy="92" rx="6" ry="4"
+        className={cn(
+          "transition-all duration-200 cursor-pointer hover:opacity-80",
+          localParts.includes("left_foot") ? "fill-rose-400" : "fill-slate-300 dark:fill-slate-600"
+        )}
+        onClick={() => togglePart("left_foot")}
+      />
+      {/* Right Foot */}
+      <ellipse
+        cx="64" cy="92" rx="6" ry="4"
+        className={cn(
+          "transition-all duration-200 cursor-pointer hover:opacity-80",
+          localParts.includes("right_foot") ? "fill-rose-400" : "fill-slate-300 dark:fill-slate-600"
+        )}
+        onClick={() => togglePart("right_foot")}
+      />
+    </svg>
+  );
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="bg-white dark:bg-slate-900 rounded-2xl border border-border shadow-xl p-5 space-y-4"
+    >
+      <h4 className="font-bold text-sm text-foreground text-center">{title}</h4>
+
+      {/* Body Diagram */}
+      <div className="relative w-48 h-64 mx-auto">
+        <BodySVG />
+      </div>
+
+      {/* Selected Parts List */}
+      {localParts.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 justify-center">
+          {localParts.map((partId) => {
+            const part = bodyParts.find((p) => p.id === partId);
+            return (
+              <span
+                key={partId}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 text-xs font-medium"
+              >
+                {part?.label}
+                <button
+                  onClick={() => togglePart(partId)}
+                  className="hover:text-rose-800"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex gap-2 pt-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onCancel}
+          className="flex-1 h-9 text-xs"
+        >
+          <X className="w-3.5 h-3.5 ml-1" />
+          انصراف
+        </Button>
+        <Button
+          size="sm"
+          onClick={handleComplete}
+          className="flex-1 h-9 text-xs bg-trust-500 hover:bg-trust-600 text-white"
+        >
+          <Check className="w-3.5 h-3.5 ml-1" />
+          ثبت انتخاب
+        </Button>
+      </div>
+    </motion.div>
+  );
+}
+
+──────────────────────────────────────────────────────────────────────
+📄 components/visit/ChatInput.tsx
+──────────────────────────────────────────────────────────────────────
+"use client";
+
+import { useState, useRef } from "react";
+import { motion } from "framer-motion";
+import {
+  Send,
+  Mic,
+  Paperclip,
+  Loader2,
+  StopCircle,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+interface ChatInputProps {
+  onSend: (message: string) => void;
+  disabled?: boolean;
+  isLoading?: boolean;
+}
+
+export default function ChatInput({ onSend, disabled, isLoading }: ChatInputProps) {
+  const [message, setMessage] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleSend = () => {
+    if (!message.trim() || disabled) return;
+    onSend(message.trim());
+    setMessage("");
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const handleInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
+    const target = e.currentTarget;
+    target.style.height = "auto";
+    target.style.height = `${Math.min(target.scrollHeight, 120)}px`;
+  };
+
+  const toggleRecording = () => {
+    setIsRecording(!isRecording);
+    // TODO: Implement actual voice recording
+  };
+
+  return (
+    <div className="border-t border-border bg-card/95 backdrop-blur-sm p-3">
+      <div className="max-w-4xl mx-auto">
+        <div className="flex items-end gap-2 bg-muted rounded-2xl p-2">
+          {/* Attach Button */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="w-9 h-9 rounded-xl shrink-0 text-muted-foreground hover:text-foreground"
+            disabled={disabled}
+          >
+            <Paperclip className="w-5 h-5" />
+          </Button>
+
+          {/* Text Input */}
+          <textarea
+            ref={textareaRef}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onInput={handleInput}
+            placeholder="علائم خود را بنویسید..."
+            disabled={disabled || isRecording}
+            className="flex-1 bg-transparent py-2.5 px-2 text-sm outline-none resize-none min-h-[40px] max-h-[120px] placeholder:text-muted-foreground"
+            rows={1}
+          />
+
+          {/* Voice / Send Button */}
+          <div className="flex gap-1 shrink-0">
+            {message.trim() ? (
+              <motion.div
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+              >
+                <Button
+                  size="icon"
+                  onClick={handleSend}
+                  disabled={disabled || isLoading}
+                  className="w-9 h-9 rounded-xl bg-gradient-to-r from-trust-500 to-healing-500 hover:from-trust-600 hover:to-healing-600 text-white shadow-lg shadow-trust-500/25"
+                >
+                  {isLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                </Button>
+              </motion.div>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleRecording}
+                className={cn(
+                  "w-9 h-9 rounded-xl transition-all",
+                  isRecording
+                    ? "bg-red-500 text-white hover:bg-red-600 animate-pulse"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {isRecording ? <StopCircle className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+              </Button>
+            )}
+          </div>
+        </div>
+        <p className="text-[10px] text-center text-muted-foreground mt-1.5">
+          هوش مصنوعی سلامت هوشمند • اطلاعات پزشکی جایگزین مشاوره پزشک نیست
+        </p>
+      </div>
+    </div>
+  );
+}
+
+──────────────────────────────────────────────────────────────────────
+📄 components/visit/ChatMessage.tsx
+──────────────────────────────────────────────────────────────────────
+"use client";
+
+import { motion } from "framer-motion";
+import { User, Bot, Stethoscope, Check, CheckCheck } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { cn } from "@/lib/utils";
+import type { ChatMessage } from "@/types/visit";
+import SymptomBox from "./SymptomBox";
+import type { SymptomData } from "@/types/visit";
+
+interface ChatMessageProps {
+  message: ChatMessage;
+  onSymptomUpdate: (symptom: SymptomData) => void;
+  onSymptomRemove: (id: string) => void;
+}
+
+export default function ChatMessage({ message, onSymptomUpdate, onSymptomRemove }: ChatMessageProps) {
+  const isUser = message.sender === "user";
+  const isAI = message.sender === "ai";
+  const isDoctor = message.sender === "doctor";
+
+  const getAvatar = () => {
+    if (isUser) return <User className="w-4 h-4 text-white" />;
+    if (isAI) return <Bot className="w-4 h-4 text-white" />;
+    return <Stethoscope className="w-4 h-4 text-white" />;
+  };
+
+  const getAvatarBg = () => {
+    if (isUser) return "bg-gradient-to-br from-trust-500 to-healing-500";
+    if (isAI) return "bg-gradient-to-br from-violet-500 to-purple-500";
+    return "bg-gradient-to-br from-amber-500 to-orange-500";
+  };
+
+  const formatTime = (timestamp: string) => {
+    return new Date(timestamp).toLocaleTimeString("fa-IR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+      className={cn("flex gap-3", isUser ? "flex-row" : "flex-row-reverse")}
+    >
+      {/* Avatar */}
+      <div className="shrink-0 flex flex-col items-center gap-1">
+        <Avatar className={cn("w-9 h-9 ring-2 ring-white dark:ring-slate-800 shadow-md", getAvatarBg())}>
+          <AvatarImage src={message.avatar} />
+          <AvatarFallback className="bg-transparent">{getAvatar()}</AvatarFallback>
+        </Avatar>
+      </div>
+
+      {/* Content */}
+      <div className={cn("flex-1 max-w-[85%]", isUser ? "items-end" : "items-start")}>
+        {/* Name & Time */}
+        <div className={cn("flex items-center gap-2 mb-1", isUser ? "justify-end" : "justify-start")}>
+          <span className="text-xs text-muted-foreground">{formatTime(message.timestamp)}</span>
+          <span className="text-xs font-medium text-foreground">
+            {isUser ? "شما" : isAI ? "هوش مصنوعی" : message.doctorName}
+          </span>
+          {isUser && <CheckCheck className="w-3 h-3 text-trust-500" />}
+        </div>
+
+        {/* Message Bubble */}
+        {message.content && (
+          <div
+            className={cn(
+              "inline-block px-4 py-2.5 rounded-2xl text-sm leading-relaxed",
+              isUser
+                ? "bg-gradient-to-r from-trust-500 to-healing-500 text-white rounded-tr-sm shadow-lg shadow-trust-500/20"
+                : "bg-muted border border-border rounded-tl-sm"
+            )}
+          >
+            {message.content}
+          </div>
+        )}
+
+        {/* Symptom Boxes */}
+        {message.symptoms && message.symptoms.length > 0 && (
+          <div className="space-y-2 mt-2">
+            {message.symptoms.map((symptom, index) => (
+              <SymptomBox
+                key={symptom.id}
+                symptom={symptom}
+                onUpdate={onSymptomUpdate}
+                onRemove={onSymptomRemove}
+                index={index}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+──────────────────────────────────────────────────────────────────────
+📄 components/visit/SymptomBox.tsx
+──────────────────────────────────────────────────────────────────────
+"use client";
+
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Thermometer,
+  Wind,
+  Activity,
+  Brain,
+  UtensilsCrossed,
+  X,
+  ChevronDown,
+  ChevronUp,
+  Check,
+  Zap,
+  Scan,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+import type { SymptomData } from "@/types/visit";
+import BodyAnatomy from "./BodyAnatomy";
+
+const iconMap = {
+  Thermometer,
+  Wind,
+  Activity,
+  Brain,
+  UtensilsCrossed,
+  Scan,
+  Zap,
+};
+
+interface SymptomBoxProps {
+  symptom: SymptomData;
+  onUpdate: (symptom: SymptomData) => void;
+  onRemove: (id: string) => void;
+  index: number;
+}
+
+export default function SymptomBox({ symptom, onUpdate, onRemove, index }: SymptomBoxProps) {
+  const [expanded, setExpanded] = useState(!symptom.completed);
+  const [showAnatomy, setShowAnatomy] = useState(false);
+
+  const config = {
+    fever: { icon: "Thermometer", gradient: "from-rose-400 to-red-500" },
+    cough: { icon: "Wind", gradient: "from-amber-400 to-orange-500" },
+    pain: { icon: "Activity", gradient: "from-red-400 to-rose-500" },
+    headache: { icon: "Brain", gradient: "from-violet-400 to-purple-500" },
+    vomiting: { icon: "UtensilsCrossed", gradient: "from-orange-400 to-red-500" },
+    skin_lesion: { icon: "Scan", gradient: "from-pink-400 to-rose-500" },
+  }[symptom.type] || { icon: "Zap", gradient: "from-trust-400 to-healing-500" };
+
+  const Icon = iconMap[config.icon as keyof typeof iconMap] || Activity;
+
+  const handleSeverityChange = (severity: number) => {
+    onUpdate({
+      ...symptom,
+      details: { ...symptom.details, severity: severity as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 },
+    });
+  };
+
+  const handleBodyPartsChange = (parts: string[]) => {
+    onUpdate({
+      ...symptom,
+      details: { ...symptom.details, bodyParts: parts },
+    });
+  };
+
+  const handleComplete = () => {
+    onUpdate({ ...symptom, completed: true });
+    setExpanded(false);
+  };
+
+  const isHighImportance = symptom.importance === "high";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.4, delay: index * 0.1 }}
+      className={cn(
+        "relative rounded-2xl border-2 overflow-hidden transition-all duration-300",
+        symptom.completed
+          ? "border-opacity-50"
+          : "border-opacity-100 shadow-lg",
+        symptom.borderColor,
+        symptom.bgColor
+      )}
+    >
+      {/* Header */}
+      <div
+        className={cn(
+          "flex items-center gap-3 p-4 cursor-pointer",
+          isHighImportance && "bg-gradient-to-r opacity-10"
+        )}
+        onClick={() => symptom.requiresDetails && setExpanded(!expanded)}
+      >
+        {/* Icon */}
+        <div className={cn(
+          "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-gradient-to-br shadow-md",
+          config.gradient
+        )}>
+          <Icon className="w-5 h-5 text-white" />
+        </div>
+
+        {/* Title */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h4 className="font-bold text-sm text-foreground">{symptom.label}</h4>
+            {isHighImportance && (
+              <Badge variant="outline" className="text-[10px] h-5 border-rose-300 text-rose-500">
+                <Zap className="w-3 h-3 ml-0.5" />
+                مهم
+              </Badge>
+            )}
+          </div>
+          {symptom.completed && symptom.details?.severity && (
+            <p className="text-xs text-muted-foreground">
+              شدت: {symptom.details.severity}/10
+              {symptom.details.bodyParts && symptom.details.bodyParts.length > 0 && (
+                ` • ${symptom.details.bodyParts.length} ناحیه`
+              )}
+            </p>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-1">
+          {symptom.completed ? (
+            <div className="w-6 h-6 rounded-full bg-healing-500/20 flex items-center justify-center">
+              <Check className="w-3.5 h-3.5 text-healing-500" />
+            </div>
+          ) : (
+            <ChevronDown className={cn(
+              "w-4 h-4 text-muted-foreground transition-transform",
+              expanded && "rotate-180"
+            )} />
+          )}
+          <button
+            onClick={(e) => { e.stopPropagation(); onRemove(symptom.id); }}
+            className="w-6 h-6 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center justify-center transition-colors"
+          >
+            <X className="w-3.5 h-3.5 text-muted-foreground hover:text-red-500" />
+          </button>
+        </div>
+      </div>
+
+      {/* Expanded Details */}
+      <AnimatePresence>
+        {expanded && symptom.requiresDetails && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="overflow-hidden"
+          >
+            <div className="px-4 pb-4 space-y-4">
+              {/* Severity Slider */}
+              {symptom.details?.severity !== undefined && (
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-foreground flex items-center gap-1">
+                    <Zap className="w-3 h-3" />
+                    شدت علامت (۱ تا ۱۰)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-muted-foreground">خفیف</span>
+                    <div className="flex-1 flex gap-1">
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((level) => (
+                        <button
+                          key={level}
+                          onClick={() => handleSeverityChange(level)}
+                          className={cn(
+                            "flex-1 h-8 rounded-lg text-xs font-bold transition-all duration-200",
+                            symptom.details?.severity === level
+                              ? "bg-gradient-to-r from-trust-500 to-healing-500 text-white shadow-md scale-105"
+                              : "bg-muted hover:bg-muted/80 text-muted-foreground"
+                          )}
+                        >
+                          {level}
+                        </button>
+                      ))}
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">شدید</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Body Anatomy */}
+              {symptom.details?.bodyParts !== undefined && (
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-foreground flex items-center gap-1">
+                    <Activity className="w-3 h-3" />
+                    نواحی درگیر
+                  </label>
+                  {!showAnatomy ? (
+                    <div className="space-y-2">
+                      {symptom.details.bodyParts.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {symptom.details.bodyParts.map((part) => (
+                            <Badge
+                              key={part}
+                              variant="outline"
+                              className="text-[10px] border-trust-200 text-trust-600"
+                            >
+                              {part}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">هیچ ناحیه‌ای انتخاب نشده</p>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowAnatomy(true)}
+                        className="w-full h-9 text-xs border-dashed border-trust-300 hover:bg-trust-50 dark:hover:bg-trust-900/20"
+                      >
+                        <Activity className="w-3.5 h-3.5 ml-1" />
+                        انتخاب از روی بدن
+                      </Button>
+                    </div>
+                  ) : (
+                    <BodyAnatomy
+                      selectedParts={symptom.details.bodyParts}
+                      onPartsChange={handleBodyPartsChange}
+                      onComplete={() => setShowAnatomy(false)}
+                      onCancel={() => setShowAnatomy(false)}
+                      title={`ناحیه ${symptom.label} را مشخص کنید`}
+                    />
+                  )}
+                </div>
+              )}
+
+              {/* Complete Button */}
+              <Button
+                onClick={handleComplete}
+                className="w-full h-10 text-sm bg-gradient-to-r from-trust-500 to-healing-500 hover:from-trust-600 hover:to-healing-600 text-white shadow-lg shadow-trust-500/25"
+              >
+                <Check className="w-4 h-4 ml-1.5" />
+                تکمیل علامت
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+──────────────────────────────────────────────────────────────────────
+📄 components/visit/SymptomChat.tsx
+──────────────────────────────────────────────────────────────────────
+"use client";
+
+import { useState, useRef, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Check, Plus, Sparkles, Send } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import type { ChatMessage, SymptomData, SymptomOption } from "@/types/visit";
+import ChatMessageComponent from "./ChatMessage";
+import ChatInput from "./ChatInput";
+import SymptomSelector from "./SymptomSelector";
+import { createSymptomData, mockVisitHistory } from "./SymptomTemplates";
+
+// ==================== MOCK AI RESPONSES ====================
+
+const mockAIResponses: Record<string, string[]> = {
+  default: [
+    "علائم شما را بررسی می‌کنم...",
+    "با توجه به توضیحات شما، چند علامت مهم شناسایی شد.",
+    "لطفاً جزئیات هر علامت را تکمیل کنید.",
+  ],
+};
+
+// ==================== COMPONENT ====================
+
+interface SymptomChatProps {
+  onSendToDoctor: () => void;
+}
+
+export default function SymptomChat({ onSendToDoctor }: SymptomChatProps) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showSymptomSelector, setShowSymptomSelector] = useState(false);
+  const [pendingSymptoms, setPendingSymptoms] = useState<SymptomData[]>([]);
+  const [allConfirmed, setAllConfirmed] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, pendingSymptoms]);
+
+  // Get current date group
+  const getDateGroup = () => {
+    return new Date().toLocaleDateString("fa-IR", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  };
+
+  // Handle user message
+  const handleSendMessage = async (content: string) => {
+    const userMessage: ChatMessage = {
+      id: `msg-${Date.now()}`,
+      sender: "user",
+      type: "text",
+      content,
+      timestamp: new Date().toISOString(),
+      dateGroup: getDateGroup(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setIsLoading(true);
+
+    // Simulate AI processing
+    setTimeout(() => {
+      // AI "thinking" message
+      const thinkingMessage: ChatMessage = {
+        id: `thinking-${Date.now()}`,
+        sender: "ai",
+        type: "text",
+        content: "🔍 در حال تحلیل علائم شما...",
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, thinkingMessage]);
+
+      // After "thinking", show symptoms
+      setTimeout(() => {
+        setMessages((prev) => prev.filter((m) => m.id !== thinkingMessage.id));
+
+        // Detect symptoms from message (mock)
+        const detectedSymptoms = detectSymptoms(content);
+        const symptomBoxes = detectedSymptoms.map((type, i) =>
+          createSymptomData(type, `symptom-${Date.now()}-${i}`)
+        );
+
+        const aiMessage: ChatMessage = {
+          id: `ai-${Date.now()}`,
+          sender: "ai",
+          type: "symptoms",
+          content: "✨ علائم زیر از پیام شما شناسایی شد. لطفاً جزئیات هر کدام را تکمیل کنید:",
+          symptoms: symptomBoxes,
+          timestamp: new Date().toISOString(),
+        };
+
+        setMessages((prev) => [...prev, aiMessage]);
+        setPendingSymptoms(symptomBoxes);
+        setIsLoading(false);
+      }, 2000);
+    }, 500);
+  };
+
+  // Simple symptom detection (mock)
+  const detectSymptoms = (text: string): string[] => {
+    const symptoms: string[] = [];
+    const lowerText = text.toLowerCase();
+    
+    if (lowerText.includes("تب") || lowerText.includes("گرم") || lowerText.includes("لرز")) {
+      symptoms.push("fever");
+    }
+    if (lowerText.includes("سرفه") || lowerText.includes("خلط")) {
+      symptoms.push("cough");
+    }
+    if (lowerText.includes("درد") || lowerText.includes("کمر درد") || lowerText.includes("درد بدن")) {
+      symptoms.push("pain");
+    }
+    if (lowerText.includes("سردرد") || lowerText.includes("سر درد") || lowerText.includes("میگرن")) {
+      symptoms.push("headache");
+    }
+    if (lowerText.includes("استفراغ") || lowerText.includes("بالا آوردن") || lowerText.includes("حالت تهوع")) {
+      symptoms.push("vomiting");
+    }
+    if (lowerText.includes("پوست") || lowerText.includes("جوش") || lowerText.includes("ضایعه") || lowerText.includes("راش")) {
+      symptoms.push("skin_lesion");
+    }
+
+    // Default if no symptoms detected
+    if (symptoms.length === 0) {
+      symptoms.push("pain", "fever");
+    }
+
+    return symptoms;
+  };
+
+  // Handle symptom update
+  const handleSymptomUpdate = (updatedSymptom: SymptomData) => {
+    setMessages((prev) =>
+      prev.map((msg) => {
+        if (msg.symptoms) {
+          return {
+            ...msg,
+            symptoms: msg.symptoms.map((s) =>
+              s.id === updatedSymptom.id ? updatedSymptom : s
+            ),
+          };
+        }
+        return msg;
+      })
+    );
+    setPendingSymptoms((prev) =>
+      prev.map((s) => (s.id === updatedSymptom.id ? updatedSymptom : s))
+    );
+  };
+
+  // Handle symptom remove
+  const handleSymptomRemove = (symptomId: string) => {
+    setMessages((prev) =>
+      prev.map((msg) => {
+        if (msg.symptoms) {
+          return {
+            ...msg,
+            symptoms: msg.symptoms.filter((s) => s.id !== symptomId),
+          };
+        }
+        return msg;
+      })
+    );
+    setPendingSymptoms((prev) => prev.filter((s) => s.id !== symptomId));
+  };
+
+  // Handle confirm all symptoms
+  const handleConfirmAll = () => {
+    const allCompleted = pendingSymptoms.every((s) => s.completed);
+    if (!allCompleted) {
+      // Auto-complete symptoms that don't require details
+      const autoCompleted = pendingSymptoms.map((s) =>
+        !s.requiresDetails ? { ...s, completed: true } : s
+      );
+      setPendingSymptoms(autoCompleted);
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (msg.symptoms) {
+            return { ...msg, symptoms: autoCompleted };
+          }
+          return msg;
+        })
+      );
+    }
+
+    setAllConfirmed(true);
+    
+    // Add confirmation message
+    const confirmMessage: ChatMessage = {
+      id: `confirm-${Date.now()}`,
+      sender: "user",
+      type: "text",
+      content: "✅ تمام علائم تأیید شدند",
+      timestamp: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, confirmMessage]);
+
+    // AI response
+    setTimeout(() => {
+      const aiResponse: ChatMessage = {
+        id: `ai-response-${Date.now()}`,
+        sender: "ai",
+        type: "text",
+        content: "عالی! اطلاعات شما ثبت شد. آیا علامت دیگری دارید یا می‌خواهید ویزیت را برای پزشک ارسال کنید؟",
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, aiResponse]);
+    }, 1000);
+  };
+
+  // Handle add symptoms from selector
+  const handleAddSymptoms = (selected: SymptomOption[]) => {
+    const newSymptoms = selected.map((opt, i) => createSymptomData(opt.type, `symptom-add-${Date.now()}-${i}`));
+    
+    // Add as user message with symptoms on right side
+    const userSymptomMessage: ChatMessage = {
+      id: `user-symptoms-${Date.now()}`,
+      sender: "user",
+      type: "symptoms",
+      content: `علائم اضافه شده: ${selected.map((s) => s.label).join("، ")}`,
+      symptoms: newSymptoms,
+      timestamp: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, userSymptomMessage]);
+    setPendingSymptoms((prev) => [...prev, ...newSymptoms]);
+    setShowSymptomSelector(false);
+    setAllConfirmed(false);
+  };
+
+  // Get existing symptom types
+  const getExistingTypes = () => {
+    const types = new Set<string>();
+    messages.forEach((msg) => {
+      msg.symptoms?.forEach((s) => types.add(s.type));
+    });
+    return Array.from(types);
+  };
+
+  // Group messages by date
+  const groupedMessages = messages.reduce((groups, msg) => {
+    const date = msg.dateGroup || getDateGroup();
+    if (!groups[date]) groups[date] = [];
+    groups[date].push(msg);
+    return groups;
+  }, {} as Record<string, ChatMessage[]>);
+
+  return (
+    <div className="flex flex-col h-full bg-background">
+      {/* Chat Header */}
+      <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-card/95 backdrop-blur-sm">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center shadow-lg shadow-violet-500/20">
+            <Sparkles className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h3 className="font-bold text-sm text-foreground">ویزیت هوشمند</h3>
+            <p className="text-xs text-muted-foreground flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-healing-500 animate-pulse" />
+              هوش مصنوعی فعال
+            </p>
+          </div>
+        </div>
+        
+        {allConfirmed && (
+          <Button
+            onClick={onSendToDoctor}
+            size="sm"
+            className="h-9 text-xs bg-gradient-to-r from-trust-500 to-healing-500 hover:from-trust-600 hover:to-healing-600 text-white shadow-lg shadow-trust-500/25"
+          >
+            <Send className="w-3.5 h-3.5 ml-1" />
+            ارسال به پزشک
+          </Button>
+        )}
+      </div>
+
+      {/* Messages Area */}
+      <div
+        ref={chatContainerRef}
+        className="flex-1 overflow-y-auto p-4 space-y-6"
+      >
+        {/* Welcome Message */}
+        {messages.length === 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-center py-12 space-y-4"
+          >
+            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center mx-auto shadow-lg shadow-violet-500/20">
+              <Sparkles className="w-10 h-10 text-white" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-foreground">ویزیت هوشمند</h3>
+              <p className="text-sm text-muted-foreground max-w-sm mx-auto mt-2">
+                علائم خود را بنویسید. هوش مصنوعی ما آن‌ها را تحلیل کرده و به پزشک ارسال می‌کند.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 justify-center max-w-md mx-auto">
+              {["تب و لرز دارم", "سردرد شدید", "درد در قفسه سینه", "ضایعه پوستی در دست"].map((suggestion) => (
+                <button
+                  key={suggestion}
+                  onClick={() => handleSendMessage(suggestion)}
+                  className="px-3 py-1.5 rounded-full bg-muted hover:bg-trust-50 dark:hover:bg-trust-900/20 text-xs text-muted-foreground hover:text-trust-600 transition-colors border border-border"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Grouped Messages */}
+        {Object.entries(groupedMessages).map(([date, msgs]) => (
+          <div key={date} className="space-y-4">
+            {/* Date Divider */}
+            <div className="flex items-center justify-center">
+              <div className="bg-muted px-3 py-1 rounded-full">
+                <span className="text-[10px] text-muted-foreground font-medium">{date}</span>
+              </div>
+            </div>
+
+            {/* Messages */}
+            {msgs.map((message) => (
+              <ChatMessageComponent
+                key={message.id}
+                message={message}
+                onSymptomUpdate={handleSymptomUpdate}
+                onSymptomRemove={handleSymptomRemove}
+              />
+            ))}
+          </div>
+        ))}
+
+        {/* Action Buttons after AI symptoms */}
+        {pendingSymptoms.length > 0 && !allConfirmed && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex gap-2 justify-center pt-2"
+          >
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowSymptomSelector(true)}
+              className="h-9 text-xs border-dashed border-trust-300 hover:bg-trust-50 dark:hover:bg-trust-900/20"
+            >
+              <Plus className="w-3.5 h-3.5 ml-1" />
+              اضافه کردن علامت
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleConfirmAll}
+              className="h-9 text-xs bg-gradient-to-r from-trust-500 to-healing-500 hover:from-trust-600 hover:to-healing-600 text-white shadow-lg shadow-trust-500/25"
+            >
+              <Check className="w-3.5 h-3.5 ml-1" />
+              تأیید همه علائم
+            </Button>
+          </motion.div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input */}
+      <ChatInput onSend={handleSendMessage} disabled={isLoading} isLoading={isLoading} />
+
+      {/* Symptom Selector Modal */}
+      <SymptomSelector
+        isOpen={showSymptomSelector}
+        onClose={() => setShowSymptomSelector(false)}
+        onAdd={handleAddSymptoms}
+        existingTypes={getExistingTypes()}
+      />
+    </div>
+  );
+}
+
+──────────────────────────────────────────────────────────────────────
+📄 components/visit/SymptomSelector.tsx
+──────────────────────────────────────────────────────────────────────
+"use client";
+
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  X,
+  Search,
+  Thermometer,
+  Wind,
+  Activity,
+  Brain,
+  UtensilsCrossed,
+  Scan,
+  Heart,
+  Droplets,
+  Plus,
+  Check,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import { symptomCategories } from "./SymptomTemplates";
+import type { SymptomCategory, SymptomOption } from "@/types/visit";
+
+const iconMap = {
+  Thermometer,
+  Wind,
+  Activity,
+  Brain,
+  UtensilsCrossed,
+  Scan,
+  Heart,
+  Droplets,
+  Plus,
+};
+
+interface SymptomSelectorProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onAdd: (symptoms: SymptomOption[]) => void;
+  existingTypes: string[];
+}
+
+export default function SymptomSelector({ isOpen, onClose, onAdd, existingTypes }: SymptomSelectorProps) {
+  const [selectedCategory, setSelectedCategory] = useState<string>("general");
+  const [selectedSymptoms, setSelectedSymptoms] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const toggleSymptom = (symptomId: string) => {
+    setSelectedSymptoms((prev) =>
+      prev.includes(symptomId) ? prev.filter((s) => s !== symptomId) : [...prev, symptomId]
+    );
+  };
+
+  const handleAdd = () => {
+    const allSymptoms = symptomCategories.flatMap((cat) => cat.symptoms);
+    const selected = allSymptoms.filter((s) => selectedSymptoms.includes(s.id));
+    onAdd(selected);
+    setSelectedSymptoms([]);
+    setSearchQuery("");
+  };
+
+  const filteredCategories = searchQuery
+    ? symptomCategories.map((cat) => ({
+        ...cat,
+        symptoms: cat.symptoms.filter(
+          (s) =>
+            s.label.includes(searchQuery) ||
+            s.description?.includes(searchQuery)
+        ),
+      })).filter((cat) => cat.symptoms.length > 0)
+    : symptomCategories;
+
+  const currentCategory = filteredCategories.find((c) => c.id === selectedCategory) || filteredCategories[0];
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+          onClick={onClose}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
+            className="w-full max-w-2xl max-h-[80vh] bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-border overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between p-5 border-b border-border">
+              <div>
+                <h3 className="text-lg font-bold text-foreground">اضافه کردن علامت</h3>
+                <p className="text-xs text-muted-foreground">علائم مورد نظر خود را انتخاب کنید</p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full">
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+
+            {/* Search */}
+            <div className="p-4 border-b border-border">
+              <div className="relative">
+                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="جستجوی علامت..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pr-10 pl-4 py-2.5 rounded-xl border bg-background focus:outline-none focus:ring-2 focus:ring-trust-500/30 focus:border-trust-500 text-sm"
+                />
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex flex-1 overflow-hidden">
+              {/* Categories Sidebar */}
+              {!searchQuery && (
+                <div className="w-48 border-l border-border overflow-y-auto p-2 space-y-1">
+                  {symptomCategories.map((cat) => {
+                    const Icon = iconMap[cat.icon as keyof typeof iconMap] || Plus;
+                    return (
+                      <button
+                        key={cat.id}
+                        onClick={() => setSelectedCategory(cat.id)}
+                        className={cn(
+                          "w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium transition-all",
+                          selectedCategory === cat.id
+                            ? "bg-trust-500 text-white shadow-md"
+                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                        )}
+                      >
+                        <Icon className="w-4 h-4" />
+                        {cat.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Symptoms Grid */}
+              <div className="flex-1 overflow-y-auto p-4">
+                <div className="grid grid-cols-2 gap-2">
+                  {(searchQuery ? filteredCategories.flatMap((c) => c.symptoms) : currentCategory?.symptoms || []).map(
+                    (symptom) => {
+                      const isSelected = selectedSymptoms.includes(symptom.id);
+                      const isExisting = existingTypes.includes(symptom.type);
+                      return (
+                        <button
+                          key={symptom.id}
+                          onClick={() => !isExisting && toggleSymptom(symptom.id)}
+                          disabled={isExisting}
+                          className={cn(
+                            "flex items-center gap-2 p-3 rounded-xl border text-right transition-all",
+                            isSelected
+                              ? "border-trust-500 bg-trust-50 dark:bg-trust-900/20 shadow-sm"
+                              : isExisting
+                              ? "border-muted bg-muted/30 opacity-50 cursor-not-allowed"
+                              : "border-border hover:border-trust-300 hover:bg-trust-50/50 dark:hover:bg-trust-900/10"
+                          )}
+                        >
+                          <div className={cn(
+                            "w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all",
+                            isSelected
+                              ? "bg-trust-500 border-trust-500"
+                              : "border-muted-foreground/30"
+                          )}>
+                            {isSelected && <Check className="w-3 h-3 text-white" />}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-foreground">{symptom.label}</p>
+                            <p className="text-[10px] text-muted-foreground truncate">{symptom.description}</p>
+                          </div>
+                        </button>
+                      );
+                    }
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between p-4 border-t border-border bg-muted/30">
+              <span className="text-sm text-muted-foreground">
+                {selectedSymptoms.length} علامت انتخاب شده
+              </span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={onClose} className="h-9">
+                  انصراف
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleAdd}
+                  disabled={selectedSymptoms.length === 0}
+                  className="h-9 bg-gradient-to-r from-trust-500 to-healing-500 hover:from-trust-600 hover:to-healing-600 text-white"
+                >
+                  <Plus className="w-4 h-4 ml-1" />
+                  اضافه کردن
+                </Button>
+              </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+──────────────────────────────────────────────────────────────────────
+📄 components/visit/SymptomTemplates.ts
+──────────────────────────────────────────────────────────────────────
+"use client";
+
+import type { SymptomCategory, SymptomData, VisitHistory } from "@/types/visit";
+
+// ==================== VISIT HISTORY MOCK ====================
+
+export const mockVisitHistory: VisitHistory[] = [
+  {
+    id: "v1",
+    title: "ویزیت قلب و عروق",
+    doctorName: "دکتر علی محمدی",
+    date: "2026-08-28T11:00:00Z",
+    status: "completed",
+    icon: "Stethoscope",
+    iconColor: "text-trust-500",
+    bgColor: "bg-trust-50 dark:bg-trust-900/20",
+    symptoms: ["درد سینه", "تنگی نفس"],
+  },
+  {
+    id: "v2",
+    title: "ویزیت آنلاین",
+    doctorName: "دکتر سارا یوسفی",
+    date: "2026-09-05T14:30:00Z",
+    status: "completed",
+    icon: "Stethoscope",
+    iconColor: "text-healing-500",
+    bgColor: "bg-healing-50 dark:bg-healing-900/20",
+    symptoms: ["تب", "گلودرد", "سرفه"],
+  },
+  {
+    id: "v3",
+    title: "ویزیت پوست",
+    doctorName: "دکتر رضا کریمی",
+    date: "2026-09-07T09:00:00Z",
+    status: "in_progress",
+    icon: "Stethoscope",
+    iconColor: "text-amber-500",
+    bgColor: "bg-amber-50 dark:bg-amber-900/20",
+    symptoms: ["ضایعه پوستی"],
+  },
+];
+
+// ==================== SYMPTOM CATEGORIES ====================
+
+export const symptomCategories: SymptomCategory[] = [
+  {
+    id: "general",
+    label: "عمومی",
+    icon: "Thermometer",
+    symptoms: [
+      { id: "fever", type: "fever", label: "تب", description: "افزایش دمای بدن" },
+      { id: "chills", type: "chills", label: "لرز", description: "لرز و سرمازدگی" },
+      { id: "fatigue", type: "fatigue", label: "خستگی", description: "احساس خستگی مفرط" },
+      { id: "weakness", type: "weakness", label: "ضعف عمومی", description: "کاهش نیروی بدنی" },
+      { id: "sweating", type: "sweating", label: "تعرق", description: "عرق کردن بیش از حد" },
+      { id: "weight_loss", type: "weight_loss", label: "کاهش وزن", description: "کاهش غیرعادی وزن" },
+      { id: "weight_gain", type: "weight_gain", label: "افزایش وزن", description: "افزایش سریع وزن" },
+      { id: "anorexia", type: "anorexia", label: "بی‌اشتهایی", description: "عدم میل به غذا" },
+    ],
+  },
+  {
+    id: "respiratory",
+    label: "تنفسی",
+    icon: "Wind",
+    symptoms: [
+      { id: "cough", type: "cough", label: "سرفه", description: "سرفه خشک یا خلط‌دار" },
+      { id: "shortness_breath", type: "shortness_breath", label: "تنگی نفس", description: "مشکل در تنفس" },
+      { id: "chest_pain", type: "chest_pain", label: "درد قفسه سینه", description: "درد در ناحیه سینه" },
+      { id: "wheezing", type: "wheezing", label: "خس خس", description: "صدای خس خس هنگام نفس" },
+      { id: "sore_throat", type: "sore_throat", label: "گلودرد", description: "درد و التهاب گلو" },
+      { id: "runny_nose", type: "runny_nose", label: "آبریزش بینی", description: "ترشحات بینی" },
+      { id: "nasal_congestion", type: "nasal_congestion", label: "گرفتگی بینی", description: "انسداد مجاری بینی" },
+      { id: "sneezing", type: "sneezing", label: "عطسه", description: "عطسه مکرر" },
+    ],
+  },
+  {
+    id: "pain",
+    label: "درد",
+    icon: "Activity",
+    symptoms: [
+      { id: "headache", type: "headache", label: "سردرد", description: "درد در ناحیه سر" },
+      { id: "pain", type: "pain", label: "درد در بدن", description: "درد در نواحی مختلف بدن" },
+      { id: "back_pain", type: "back_pain", label: "کمردرد", description: "درد در ناحیه کمر" },
+      { id: "abdominal_pain", type: "abdominal_pain", label: "درد شکم", description: "درد در ناحیه شکم" },
+      { id: "joint_pain", type: "joint_pain", label: "درد مفاصل", description: "درد در مفاصل" },
+      { id: "muscle_pain", type: "muscle_pain", label: "درد عضلانی", description: "درد در عضلات" },
+      { id: "toothache", type: "toothache", label: "دندان درد", description: "درد در دندان‌ها" },
+      { id: "earache", type: "earache", label: "گوش درد", description: "درد در گوش" },
+    ],
+  },
+  {
+    id: "digestive",
+    label: "گوارشی",
+    icon: "Utensils",
+    symptoms: [
+      { id: "vomiting", type: "vomiting", label: "استفراغ", description: "بالا آوردن غذا" },
+      { id: "nausea", type: "nausea", label: "حالت تهوع", description: "احساس تهوع" },
+      { id: "diarrhea", type: "diarrhea", label: "اسهال", description: "مدفوع آبکی" },
+      { id: "constipation", type: "constipation", label: "یبوست", description: "دشواری در دفع" },
+      { id: "bloating", type: "bloating", label: "نفخ", description: "احساس پری شکم" },
+      { id: "heartburn", type: "heartburn", label: "سوزش سر دل", description: "سوزش در مری" },
+      { id: "loss_appetite", type: "loss_appetite", label: "کاهش اشتها", description: "کم شدن میل به غذا" },
+    ],
+  },
+  {
+    id: "skin",
+    label: "پوست",
+    icon: "Scan",
+    symptoms: [
+      { id: "skin_lesion", type: "skin_lesion", label: "ضایعه پوستی", description: "تغییرات ظاهری پوست" },
+      { id: "rash", type: "rash", label: "راش", description: "جوش‌های پوستی" },
+      { id: "itching", type: "itching", label: "خارش", description: "خارش پوست" },
+      { id: "redness", type: "redness", label: "قرمزی", description: "قرمزی پوست" },
+      { id: "swelling", type: "swelling", label: "تورم", description: "ورم در نواحی مختلف" },
+      { id: "dry_skin", type: "dry_skin", label: "خشکی پوست", description: "پوست خشک و پوسته‌پوسته" },
+      { id: "bruising", type: "bruising", label: "کبودی", description: "کبودی‌های پوستی" },
+    ],
+  },
+  {
+    id: "neurological",
+    label: "اعصاب",
+    icon: "Brain",
+    symptoms: [
+      { id: "dizziness", type: "dizziness", label: "سرگیجه", description: "احساس چرخش سر" },
+      { id: "numbness", type: "numbness", label: "بی‌حسی", description: "از دست دادن حس" },
+      { id: "tingling", type: "tingling", label: "گزگز", description: "احساس سوزن سوزن شدن" },
+      { id: "tremor", type: "tremor", label: "لرزش", description: "لرزش غیرارادی" },
+      { id: "seizure", type: "seizure", label: "تشنج", description: "حمله صرع" },
+      { id: "confusion", type: "confusion", label: "گیجی", description: "سردرگمی" },
+      { id: "memory_loss", type: "memory_loss", label: "فراموشی", description: "کاهش حافظه" },
+    ],
+  },
+  {
+    id: "cardiovascular",
+    label: "قلب و عروق",
+    icon: "Heart",
+    symptoms: [
+      { id: "chest_tightness", type: "chest_tightness", label: "فشار سینه", description: "احساس فشار در سینه" },
+      { id: "palpitations", type: "palpitations", label: "تپش قلب", description: "ضربان نامنظم قلب" },
+      { id: "leg_swelling", type: "leg_swelling", label: "ورم پاها", description: "تورم در پاها" },
+      { id: "cold_extremities", type: "cold_extremities", label: "سردی اندام‌ها", description: "دست و پای سرد" },
+    ],
+  },
+  {
+    id: "urinary",
+    label: "ادراری",
+    icon: "Droplets",
+    symptoms: [
+      { id: "frequent_urination", type: "frequent_urination", label: "تکرر ادرار", description: "دفع مکرر ادرار" },
+      { id: "painful_urination", type: "painful_urination", label: "درد هنگام ادرار", description: "سوزش و درد" },
+      { id: "blood_urine", type: "blood_urine", label: "خون در ادرار", description: "هماتوری" },
+      { id: "urgency", type: "urgency", label: "فوریت ادرار", description: "نیاز فوری به دفع" },
+    ],
+  },
+];
+
+// ==================== BODY PARTS FOR ANATOMY ====================
+
+export const bodyParts = [
+  { id: "head", label: "سر", x: 50, y: 8, width: 16, height: 12 },
+  { id: "neck", label: "گردن", x: 50, y: 18, width: 10, height: 6 },
+  { id: "chest", label: "قفسه سینه", x: 50, y: 28, width: 28, height: 14 },
+  { id: "abdomen", label: "شکم", x: 50, y: 42, width: 24, height: 12 },
+  { id: "left_arm", label: "دست چپ", x: 22, y: 32, width: 12, height: 28 },
+  { id: "right_arm", label: "دست راست", x: 78, y: 32, width: 12, height: 28 },
+  { id: "left_hand", label: "دست چپ", x: 14, y: 58, width: 10, height: 8 },
+  { id: "right_hand", label: "دست راست", x: 86, y: 58, width: 10, height: 8 },
+  { id: "left_leg", label: "پای چپ", x: 38, y: 56, width: 14, height: 36 },
+  { id: "right_leg", label: "پای راست", x: 62, y: 56, width: 14, height: 36 },
+  { id: "left_foot", label: "پای چپ", x: 36, y: 90, width: 12, height: 8 },
+  { id: "right_foot", label: "پای راست", x: 64, y: 90, width: 12, height: 8 },
+  { id: "back", label: "کمر", x: 50, y: 35, width: 24, height: 16 },
+  { id: "shoulders", label: "شانه‌ها", x: 50, y: 22, width: 36, height: 8 },
+];
+
+// ==================== SYMPTOM CONFIGURATION ====================
+
+export const symptomConfig: Record<string, {
+  label: string;
+  color: string;
+  bgColor: string;
+  borderColor: string;
+  importance: "high" | "medium" | "low";
+  requiresDetails: boolean;
+  hasAnatomy: boolean;
+  hasSeverity: boolean;
+}> = {
+  fever: {
+    label: "تب",
+    color: "text-rose-500",
+    bgColor: "bg-rose-50 dark:bg-rose-900/20",
+    borderColor: "border-rose-200 dark:border-rose-800",
+    importance: "high",
+    requiresDetails: true,
+    hasAnatomy: false,
+    hasSeverity: true,
+  },
+  cough: {
+    label: "سرفه",
+    color: "text-amber-500",
+    bgColor: "bg-amber-50 dark:bg-amber-900/20",
+    borderColor: "border-amber-200 dark:border-amber-800",
+    importance: "medium",
+    requiresDetails: true,
+    hasAnatomy: false,
+    hasSeverity: true,
+  },
+  pain: {
+    label: "درد در بدن",
+    color: "text-red-500",
+    bgColor: "bg-red-50 dark:bg-red-900/20",
+    borderColor: "border-red-200 dark:border-red-800",
+    importance: "high",
+    requiresDetails: true,
+    hasAnatomy: true,
+    hasSeverity: true,
+  },
+  headache: {
+    label: "سردرد",
+    color: "text-violet-500",
+    bgColor: "bg-violet-50 dark:bg-violet-900/20",
+    borderColor: "border-violet-200 dark:border-violet-800",
+    importance: "high",
+    requiresDetails: true,
+    hasAnatomy: false,
+    hasSeverity: true,
+  },
+  vomiting: {
+    label: "استفراغ",
+    color: "text-orange-500",
+    bgColor: "bg-orange-50 dark:bg-orange-900/20",
+    borderColor: "border-orange-200 dark:border-orange-800",
+    importance: "high",
+    requiresDetails: true,
+    hasAnatomy: false,
+    hasSeverity: true,
+  },
+  skin_lesion: {
+    label: "ضایعه پوستی",
+    color: "text-pink-500",
+    bgColor: "bg-pink-50 dark:bg-pink-900/20",
+    borderColor: "border-pink-200 dark:border-pink-800",
+    importance: "medium",
+    requiresDetails: true,
+    hasAnatomy: true,
+    hasSeverity: false,
+  },
+};
+
+// ==================== INITIAL SYMPTOM DATA FACTORY ====================
+
+export function createSymptomData(type: string, id: string): SymptomData {
+  const config = symptomConfig[type] || {
+    label: type,
+    color: "text-trust-500",
+    bgColor: "bg-trust-50 dark:bg-trust-900/20",
+    borderColor: "border-trust-200 dark:border-trust-800",
+    importance: "medium",
+    requiresDetails: false,
+    hasAnatomy: false,
+    hasSeverity: false,
+  };
+
+  return {
+    id,
+    type,
+    label: config.label,
+    icon: "Activity",
+    color: config.color,
+    bgColor: config.bgColor,
+    borderColor: config.borderColor,
+    importance: config.importance,
+    requiresDetails: config.requiresDetails,
+    details: config.requiresDetails ? {
+      severity: config.hasSeverity ? 5 : undefined,
+      bodyParts: config.hasAnatomy ? [] : undefined,
+      duration: "",
+      frequency: "",
+      description: "",
+    } : undefined,
+    completed: !config.requiresDetails,
+  };
+}
+
+──────────────────────────────────────────────────────────────────────
+📄 components/visit/VisitSidebar.tsx
+──────────────────────────────────────────────────────────────────────
+"use client";
+
+import { motion } from "framer-motion";
+import {
+  Stethoscope,
+  Clock,
+  CheckCircle2,
+  ChevronLeft,
+  Plus,
+  Search,
+} from "lucide-react";
+import { cn, formatRelativeTime } from "@/lib/utils";
+import type { VisitHistory } from "@/types/visit";
+import { Button } from "@/components/ui/button";
+
+interface VisitSidebarProps {
+  visits: VisitHistory[];
+  selectedVisitId?: string;
+  onSelectVisit: (visit: VisitHistory) => void;
+  onNewVisit: () => void;
+}
+
+const statusConfig = {
+  completed: { icon: CheckCircle2, color: "text-healing-500", bg: "bg-healing-50 dark:bg-healing-900/20", label: "تکمیل شده" },
+  pending: { icon: Clock, color: "text-amber-500", bg: "bg-amber-50 dark:bg-amber-900/20", label: "در انتظار" },
+  in_progress: { icon: Stethoscope, color: "text-trust-500", bg: "bg-trust-50 dark:bg-trust-900/20", label: "در حال ویزیت" },
+};
+
+export default function VisitSidebar({ visits, selectedVisitId, onSelectVisit, onNewVisit }: VisitSidebarProps) {
+  return (
+    <div className="w-full h-full flex flex-col bg-card border-l border-border">
+      {/* Header */}
+      <div className="p-4 border-b border-border space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-sm text-foreground">ویزیت‌های قبلی</h3>
+          <span className="text-xs text-muted-foreground">{visits.length} ویزیت</span>
+        </div>
+        
+        {/* New Visit Button */}
+        <Button
+          onClick={onNewVisit}
+          className="w-full h-10 text-sm bg-gradient-to-r from-trust-500 to-healing-500 hover:from-trust-600 hover:to-healing-600 text-white shadow-lg shadow-trust-500/25"
+        >
+          <Plus className="w-4 h-4 ml-1.5" />
+          ویزیت جدید
+        </Button>
+
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="جستجو..."
+            className="w-full pr-9 pl-3 py-2 rounded-xl border bg-background text-xs focus:outline-none focus:ring-2 focus:ring-trust-500/30 focus:border-trust-500"
+          />
+        </div>
+      </div>
+
+      {/* Visit List */}
+      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+        {visits.map((visit, index) => {
+          const status = statusConfig[visit.status];
+          const StatusIcon = status.icon;
+          const isSelected = selectedVisitId === visit.id;
+
+          return (
+            <motion.button
+              key={visit.id}
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: index * 0.05 }}
+              onClick={() => onSelectVisit(visit)}
+              className={cn(
+                "w-full text-right p-3 rounded-xl transition-all duration-200 group",
+                isSelected
+                  ? "bg-trust-50 dark:bg-trust-900/20 border border-trust-200 dark:border-trust-800 shadow-sm"
+                  : "hover:bg-muted border border-transparent"
+              )}
+            >
+              <div className="flex items-start gap-3">
+                {/* Icon */}
+                <div className={cn(
+                  "w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
+                  visit.bgColor
+                )}>
+                  <Stethoscope className={cn("w-5 h-5", visit.iconColor)} />
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <h4 className={cn(
+                    "text-sm font-semibold truncate",
+                    isSelected ? "text-trust-600" : "text-foreground"
+                  )}>
+                    {visit.title}
+                  </h4>
+                  <p className="text-xs text-muted-foreground truncate">{visit.doctorName}</p>
+                  
+                  {/* Symptoms Tags */}
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {visit.symptoms.slice(0, 2).map((symptom, i) => (
+                      <span key={i} className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+                        {symptom}
+                      </span>
+                    ))}
+                    {visit.symptoms.length > 2 && (
+                      <span className="text-[10px] text-muted-foreground">+{visit.symptoms.length - 2}</span>
+                    )}
+                  </div>
+
+                  {/* Footer */}
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-[10px] text-muted-foreground">
+                      {formatRelativeTime(visit.date)}
+                    </span>
+                    <div className={cn("flex items-center gap-1 text-[10px]", status.color)}>
+                      <StatusIcon className="w-3 h-3" />
+                      {status.label}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Arrow */}
+                <ChevronLeft className={cn(
+                  "w-4 h-4 shrink-0 transition-colors",
+                  isSelected ? "text-trust-500" : "text-muted-foreground/30 group-hover:text-muted-foreground"
+                )} />
+              </div>
+            </motion.button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 ──────────────────────────────────────────────────────────────────────
 📄 lib/api-client.ts
@@ -4859,6 +6731,95 @@ export interface RecordActivity {
   icon: string;
   iconColor: string;
   bgColor: string;
+}
+
+──────────────────────────────────────────────────────────────────────
+📄 types/visit.ts
+──────────────────────────────────────────────────────────────────────
+"use client";
+
+// ==================== CHAT MESSAGE TYPES ====================
+
+export type MessageSender = "user" | "ai" | "doctor";
+
+export type MessageType = "text" | "symptoms" | "doctor_reply";
+
+export interface ChatMessage {
+  id: string;
+  sender: MessageSender;
+  type: MessageType;
+  content?: string;
+  symptoms?: SymptomBox[];
+  timestamp: string;
+  dateGroup?: string;
+  avatar?: string;
+  doctorName?: string;
+}
+
+// ==================== SYMPTOM BOX TYPES ====================
+
+export type SymptomSeverity = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+
+export type SymptomType = 
+  | "fever"           // تب
+  | "cough"           // سرفه
+  | "pain"            // درد در بدن (با آناتومی)
+  | "headache"        // سردرد
+  | "vomiting"        // استفراغ
+  | "skin_lesion"     // ضایعه پوستی (با آناتومی)
+  | string;           // سایر علائم
+
+export interface SymptomData {
+  id: string;
+  type: SymptomType;
+  label: string;
+  icon: string;
+  color: string;
+  bgColor: string;
+  borderColor: string;
+  importance: "high" | "medium" | "low";
+  requiresDetails: boolean;
+  details?: SymptomDetails;
+  completed: boolean;
+}
+
+export interface SymptomDetails {
+  severity?: SymptomSeverity;
+  bodyParts?: string[];       // برای درد و ضایعه پوستی
+  duration?: string;
+  frequency?: string;
+  description?: string;
+}
+
+// ==================== VISIT HISTORY TYPES ====================
+
+export interface VisitHistory {
+  id: string;
+  title: string;
+  doctorName: string;
+  clinicName?: string;
+  date: string;
+  status: "completed" | "pending" | "in_progress";
+  icon: string;
+  iconColor: string;
+  bgColor: string;
+  symptoms: string[];
+}
+
+// ==================== SYMPTOM CATEGORY TYPES ====================
+
+export interface SymptomCategory {
+  id: string;
+  label: string;
+  icon: string;
+  symptoms: SymptomOption[];
+}
+
+export interface SymptomOption {
+  id: string;
+  type: SymptomType;
+  label: string;
+  description?: string;
 }
 
 ======================================================================

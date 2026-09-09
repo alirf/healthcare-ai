@@ -54,33 +54,44 @@ export default function ChatMessage({ message, onSymptomUpdate, onSymptomRemove 
       </div>
 
       {/* Content */}
-      <div className={cn("flex-1 max-w-[85%]", isUser ? "items-end" : "items-start")}>
-        {/* Name & Time */}
-        <div className={cn("flex items-center gap-2 mb-1", isUser ? "justify-end" : "justify-start")}>
-          <span className="text-xs text-muted-foreground">{formatTime(message.timestamp)}</span>
-          <span className="text-xs font-medium text-foreground">
-            {isUser ? "شما" : isAI ? "هوش مصنوعی" : message.doctorName}
-          </span>
-          {isUser && <CheckCheck className="w-3 h-3 text-trust-500" />}
-        </div>
+      <div
+        className={cn(
+          "flex-1 max-w-[85%] flex flex-col",
+          isUser ? "items-start" : "items-end" // items-start = راست (RTL) برای کاربر، items-end = چپ برای AI
+        )}
+      >
+        {!isUser && (
+          <div className="block w-fit text-xs font-medium text-gray-600 dark:text-gray-400 mb-1 mr-1">
+            {isAI ? "هوش مصنوعی" : message.doctorName}
+          </div>
+        )}
 
         {/* Message Bubble */}
         {message.content && (
           <div
             className={cn(
-              "inline-block px-4 py-2.5 rounded-2xl text-sm leading-relaxed",
+              "w-fit max-w-full break-words whitespace-pre-wrap relative px-4 py-2.5 rounded-2xl text-sm leading-relaxed",
               isUser
-                ? "bg-gradient-to-r from-trust-500 to-healing-500 text-white rounded-tr-sm shadow-lg shadow-trust-500/20"
-                : "bg-muted border border-border rounded-tl-sm"
+                ? "bg-[#0084ff] text-white rounded-br-sm shadow-md"
+                : "bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-bl-sm shadow-sm"
             )}
           >
             {message.content}
+            <div
+              className={cn(
+                "flex items-center gap-1 mt-1 text-[10px]",
+                isUser ? "justify-end text-white/70" : "justify-start text-gray-400 dark:text-gray-500"
+              )}
+            >
+              <span>{formatTime(message.timestamp)}</span>
+              {isUser && <CheckCheck className="w-3 h-3" />}
+            </div>
           </div>
         )}
 
         {/* Symptom Boxes */}
         {message.symptoms && message.symptoms.length > 0 && (
-          <div className="space-y-2 mt-2">
+          <div className="w-full space-y-2 mt-2">
             {message.symptoms.map((symptom, index) => (
               <SymptomBox
                 key={symptom.id}
