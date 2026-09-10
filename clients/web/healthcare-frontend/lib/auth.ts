@@ -23,6 +23,6 @@ export async function getSession(): Promise<JWTPayload | null> {
 }
 
 export async function isAuthenticated(): Promise<boolean> {
-  return true;
+  //return true;
   return !!(await getSession());
 }

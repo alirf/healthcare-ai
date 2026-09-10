@@ -87,6 +87,7 @@ export const setTokens = (tokens: AuthTokens) => {
     localStorage.setItem("access_token", tokens.access_token);
     localStorage.setItem("refresh_token", tokens.refresh_token);
     localStorage.setItem("token_expires_at", String(Date.now() + tokens.expires_in * 1000));
+    document.cookie = `access_token=${tokens.access_token}; path=/; max-age=${tokens.expires_in}; SameSite=Lax`;
   }
 };
 
@@ -110,6 +111,7 @@ export const clearTokens = () => {
     localStorage.removeItem("refresh_token");
     localStorage.removeItem("token_expires_at");
     localStorage.removeItem("user");
+    document.cookie = "access_token=; path=/; max-age=0";
   }
 };
 

@@ -1,10 +1,10 @@
 ======================================================================
 📁 پوشه مبدا: D:\med\healthcare-ai\clients\web\healthcare-frontend
-📊 تعداد فایل‌های جمع‌آوری شده: 59
+📊 تعداد فایل‌های جمع‌آوری شده: 61
 ❌ تعداد خطاها: 0
-📁 پوشه‌های رد شده: env, .venv, .env, node_modules, coverage, out, .next, static, target, .idea, public, build, .nuxt, .vscode, dist, assets, venv, .output, __pycache__, .git
+📁 پوشه‌های رد شده: assets, public, .git, env, static, .idea, .env, node_modules, venv, out, .nuxt, __pycache__, dist, target, .output, .next, coverage, .venv, build, .vscode
 ======================================================================
-⚡ فقط پسوندهای: .tsx, .py, .java, .ts
+⚡ فقط پسوندهای: .tsx, .java, .py, .ts
 ======================================================================
 
 
@@ -1600,6 +1600,7 @@ import { isAuthenticated } from "@/lib/auth";
 import Header from "@/components/layout/Header";
 import Sidebar from "@/components/layout/Sidebar";
 import MobileNav from "@/components/layout/MobileNav";
+import MainContentWrapper from "@/components/layout/MainContentWrapper"; // ← این import رو اضافه کن
 
 export default async function VisitLayout({
   children,
@@ -1607,7 +1608,7 @@ export default async function VisitLayout({
   children: React.ReactNode;
 }) {
   const authenticated = await isAuthenticated();
-  
+
   if (!authenticated) {
     redirect("/login");
   }
@@ -1615,9 +1616,9 @@ export default async function VisitLayout({
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <Header />
-      <div className="flex flex-1 pt-[60px]">
+      <div className="flex flex-1">
         <Sidebar />
-        <main className="flex-1 transition-all duration-300 h-[calc(100vh-60px)] overflow-hidden lg:pr-[280px]">
+        <main className="flex-1 transition-all duration-300 overflow-hidden">
           {children}
         </main>
       </div>
@@ -1631,29 +1632,131 @@ export default async function VisitLayout({
 ──────────────────────────────────────────────────────────────────────
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSidebarStore } from "@/stores/sidebar-store";
-import { Stethoscope, Menu } from "lucide-react";
+import { Menu, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import SymptomChat from "@/components/visit/SymptomChat";
+import SymptomChat, { type SymptomChatHandle } from "@/components/visit/SymptomChat";
 import VisitSidebar from "@/components/visit/VisitSidebar";
 import { mockVisitHistory } from "@/components/visit/SymptomTemplates";
-import type { VisitHistory } from "@/types/visit";
+import { fetchVisits, fetchVisitDetail, saveVisit } from "@/lib/visit-service";
+import type { ChatMessage, VisitHistory } from "@/types/visit";
+import { Stethoscope } from "lucide-react";
+
+// برچسب فارسی علائم (اگر SymptomData فیلد label ندارد)
+const SYMPTOM_LABELS: Record<string, string> = {
+  fever: "تب",
+  cough: "سرفه",
+  pain: "درد",
+  headache: "سردرد",
+  vomiting: "حالت تهوع/استفراغ",
+  skin_lesion: "ضایعه پوستی",
+};
 
 export default function VisitPage() {
   const { isOpen, isCollapsed, open, setCollapsed } = useSidebarStore();
-  const [selectedVisit, setSelectedVisit] = useState<VisitHistory | undefined>();
-  const [showVisitList, setShowVisitList] = useState(true);
 
+  const [visits, setVisits] = useState<VisitHistory[]>(mockVisitHistory);
+  const [selectedVisitId, setSelectedVisitId] = useState<string | undefined>();
+  const [showVisitList, setShowVisitList] = useState(true);
+  const [loadingVisit, setLoadingVisit] = useState(false);
+
+  // با تغییر chatKey کامپوننت چت کاملاً ریست می‌شود
+  const [chatKey, setChatKey] = useState(0);
+  const [historyMessages, setHistoryMessages] = useState<ChatMessage[] | null>(null);
+
+  const chatRef = useRef<SymptomChatHandle>(null);
+
+  // بارگذاری لیست ویزیت‌ها از سرور (وقتی بک‌اند آماده شد، خط mock حذف شود)
+  useEffect(() => {
+    fetchVisits()
+      .then(setVisits)
+      .catch(() => {
+        /* سرور هنوز آماده نیست → از mock استفاده می‌کنیم */
+      });
+  }, []);
+
+  // ========== ویزیت جدید ==========
   const handleNewVisit = () => {
-    setSelectedVisit(undefined);
-    // Reset chat state would go here
+  const chat = chatRef.current;
+
+  // حالت ۱: کاربر چتی نکرده → فقط ریست
+  if (!chat || !chat.hasUserChatted()) {
+    setSelectedVisitId(undefined);
+    setHistoryMessages(null);
+    setChatKey((k) => k + 1);
+    return;
+  }
+
+  // حالت ۲: ذخیره روی سرور و بعد تازه‌سازی لیست از سرور
+  const snapshot = chat.getVisitSnapshot();
+  saveVisit({ messages: snapshot.messages, symptoms: snapshot.symptoms })
+    .then(async () => {
+      const fresh = await fetchVisits();   // آیدی‌های واقعی از دیتابیس
+      setVisits(fresh);
+    })
+    .catch((err) => console.error("خطا در ذخیره ویزیت:", err));
+
+  setSelectedVisitId(undefined);
+  setHistoryMessages(null);
+  setChatKey((k) => k + 1);
+};
+
+  // ========== انتخاب ویزیت قبلی ==========
+  const handleSelectVisit = async (visit: VisitHistory) => {
+    setSelectedVisitId(visit.id);
+    setLoadingVisit(true);
+
+    try {
+      const messages = await fetchVisitDetail(visit.id);
+      setHistoryMessages(messages);
+      setChatKey((k) => k + 1); // ریست چت با پیام‌های تاریخچه
+    } catch (err) {
+      console.error("خطا در دریافت ویزیت از سرور:", err);
+      // فعلاً چت خالی نمایش داده می‌شود تا UI خراب نشود
+      setHistoryMessages([]);
+      setChatKey((k) => k + 1);
+    } finally {
+      setLoadingVisit(false);
+    }
   };
+
+  const isReadOnly = selectedVisitId !== undefined;
 
   return (
     <div className="h-full flex">
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col h-full relative">
+        {/* Toggle Visit List Button */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setShowVisitList(!showVisitList)}
+          className="absolute top-3 z-30 w-8 h-8 rounded-lg border shadow-sm bg-card left-3">
+          <Menu className="w-4 h-4" />
+        </Button>
+
+        {/* Loading Overlay برای بارگذاری ویزیت */}
+        {loadingVisit && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/60 backdrop-blur-sm">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground bg-card px-4 py-2 rounded-xl border shadow-sm">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              در حال بارگذاری ویزیت...
+            </div>
+          </div>
+        )}
+
+        <SymptomChat
+          key={chatKey}
+          ref={chatRef}
+          onSendToDoctor={() => console.log("Sending to doctor...")}
+          initialMessages={historyMessages ?? undefined}
+          readOnly={isReadOnly}
+        />
+      </div>
+
       {/* Visit Sidebar (Left side in RTL) */}
       <AnimatePresence>
         {showVisitList && (
@@ -1665,32 +1768,14 @@ export default function VisitPage() {
             className="shrink-0 h-full border-l border-border overflow-hidden"
           >
             <VisitSidebar
-              visits={mockVisitHistory}
-              selectedVisitId={selectedVisit?.id}
-              onSelectVisit={setSelectedVisit}
+              visits={visits}
+              selectedVisitId={selectedVisitId}
+              onSelectVisit={handleSelectVisit}
               onNewVisit={handleNewVisit}
             />
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col h-full relative">
-        {/* Toggle Visit List Button */}
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setShowVisitList(!showVisitList)}
-          className={cn(
-            "absolute top-3 z-10 w-8 h-8 rounded-lg border shadow-sm bg-card",
-            showVisitList ? "left-3" : "right-3"
-          )}
-        >
-          <Menu className="w-4 h-4" />
-        </Button>
-
-        <SymptomChat onSendToDoctor={() => console.log("Sending to doctor...")} />
-      </div>
     </div>
   );
 }
@@ -3089,6 +3174,26 @@ export default function Header() {
 }
 
 ──────────────────────────────────────────────────────────────────────
+📄 components/layout/MainContentWrapper.tsx
+──────────────────────────────────────────────────────────────────────
+"use client";
+import { useSidebarStore } from "@/stores/sidebar-store";
+import { cn } from "@/lib/utils";
+
+export default function MainContentWrapper({ children }: { children: React.ReactNode }) {
+  const { isCollapsed } = useSidebarStore();
+  return (
+    <main
+      className={cn(
+        "flex-1 transition-all duration-300 h-[calc(100vh-60px)] overflow-hidden",
+      )}
+    >
+      {children}
+    </main>
+  );
+}
+
+──────────────────────────────────────────────────────────────────────
 📄 components/layout/MobileNav.tsx
 ──────────────────────────────────────────────────────────────────────
 "use client";
@@ -4457,33 +4562,44 @@ export default function ChatMessage({ message, onSymptomUpdate, onSymptomRemove 
       </div>
 
       {/* Content */}
-      <div className={cn("flex-1 max-w-[85%]", isUser ? "items-end" : "items-start")}>
-        {/* Name & Time */}
-        <div className={cn("flex items-center gap-2 mb-1", isUser ? "justify-end" : "justify-start")}>
-          <span className="text-xs text-muted-foreground">{formatTime(message.timestamp)}</span>
-          <span className="text-xs font-medium text-foreground">
-            {isUser ? "شما" : isAI ? "هوش مصنوعی" : message.doctorName}
-          </span>
-          {isUser && <CheckCheck className="w-3 h-3 text-trust-500" />}
-        </div>
+      <div
+        className={cn(
+          "flex-1 max-w-[85%] flex flex-col",
+          isUser ? "items-start" : "items-end" // items-start = راست (RTL) برای کاربر، items-end = چپ برای AI
+        )}
+      >
+        {!isUser && (
+          <div className="block w-fit text-xs font-medium text-gray-600 dark:text-gray-400 mb-1 mr-1">
+            {isAI ? "هوش مصنوعی" : message.doctorName}
+          </div>
+        )}
 
         {/* Message Bubble */}
         {message.content && (
           <div
             className={cn(
-              "inline-block px-4 py-2.5 rounded-2xl text-sm leading-relaxed",
+              "w-fit max-w-full break-words whitespace-pre-wrap relative px-4 py-2.5 rounded-2xl text-sm leading-relaxed",
               isUser
-                ? "bg-gradient-to-r from-trust-500 to-healing-500 text-white rounded-tr-sm shadow-lg shadow-trust-500/20"
-                : "bg-muted border border-border rounded-tl-sm"
+                ? "bg-[#0084ff] text-white rounded-br-sm shadow-md"
+                : "bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-bl-sm shadow-sm"
             )}
           >
             {message.content}
+            <div
+              className={cn(
+                "flex items-center gap-1 mt-1 text-[10px]",
+                isUser ? "justify-end text-white/70" : "justify-start text-gray-400 dark:text-gray-500"
+              )}
+            >
+              <span>{formatTime(message.timestamp)}</span>
+              {isUser && <CheckCheck className="w-3 h-3" />}
+            </div>
           </div>
         )}
 
         {/* Symptom Boxes */}
         {message.symptoms && message.symptoms.length > 0 && (
-          <div className="space-y-2 mt-2">
+          <div className="w-full space-y-2 mt-2">
             {message.symptoms.map((symptom, index) => (
               <SymptomBox
                 key={symptom.id}
@@ -4759,386 +4875,435 @@ export default function SymptomBox({ symptom, onUpdate, onRemove, index }: Sympt
 ──────────────────────────────────────────────────────────────────────
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Check, Plus, Sparkles, Send } from "lucide-react";
+import { Check, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ChatMessage, SymptomData, SymptomOption } from "@/types/visit";
 import ChatMessageComponent from "./ChatMessage";
 import ChatInput from "./ChatInput";
 import SymptomSelector from "./SymptomSelector";
-import { createSymptomData, mockVisitHistory } from "./SymptomTemplates";
+import { createSymptomData } from "./SymptomTemplates";
 
-// ==================== MOCK AI RESPONSES ====================
+// ==================== TYPES ====================
 
-const mockAIResponses: Record<string, string[]> = {
-  default: [
-    "علائم شما را بررسی می‌کنم...",
-    "با توجه به توضیحات شما، چند علامت مهم شناسایی شد.",
-    "لطفاً جزئیات هر علامت را تکمیل کنید.",
-  ],
-};
-
-// ==================== COMPONENT ====================
+export interface SymptomChatHandle {
+  hasUserChatted: () => boolean;
+  getVisitSnapshot: () => { messages: ChatMessage[]; symptoms: SymptomData[] };
+  reset: () => void;
+}
 
 interface SymptomChatProps {
   onSendToDoctor: () => void;
+  initialMessages?: ChatMessage[]; // پیام‌های ویزیت قبلی
+  readOnly?: boolean;              // حالت مشاهده‌ی تاریخچه
 }
 
-export default function SymptomChat({ onSendToDoctor }: SymptomChatProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [showSymptomSelector, setShowSymptomSelector] = useState(false);
-  const [pendingSymptoms, setPendingSymptoms] = useState<SymptomData[]>([]);
-  const [allConfirmed, setAllConfirmed] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
+// ==================== COMPONENT ====================
 
-  // Auto-scroll
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, pendingSymptoms]);
+const SymptomChat = forwardRef<SymptomChatHandle, SymptomChatProps>(
+  ({ onSendToDoctor, initialMessages, readOnly = false }, ref) => {
+    const [messages, setMessages] = useState<ChatMessage[]>(() => initialMessages ?? []);
+    const [isLoading, setIsLoading] = useState(false);
+    const [showSymptomSelector, setShowSymptomSelector] = useState(false);
+    const [pendingSymptoms, setPendingSymptoms] = useState<SymptomData[]>([]);
+    const [allConfirmed, setAllConfirmed] = useState(false);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const chatContainerRef = useRef<HTMLDivElement>(null);
 
-  // Get current date group
-  const getDateGroup = () => {
-    return new Date().toLocaleDateString("fa-IR", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
-  };
+    // Expose methods to parent (VisitPage)
+    useImperativeHandle(ref, () => ({
+      hasUserChatted: () => messages.some((m) => m.sender === "user"),
+      getVisitSnapshot: () => ({ messages, symptoms: pendingSymptoms }),
+      reset: () => {
+        setMessages([]);
+        setPendingSymptoms([]);
+        setAllConfirmed(false);
+        setIsLoading(false);
+      },
+    }), [messages, pendingSymptoms]);
 
-  // Handle user message
-  const handleSendMessage = async (content: string) => {
-    const userMessage: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      sender: "user",
-      type: "text",
-      content,
-      timestamp: new Date().toISOString(),
-      dateGroup: getDateGroup(),
+    // Auto-scroll
+    useEffect(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages, pendingSymptoms]);
+
+    // Get current date group
+    const getDateGroup = () => {
+      return new Date().toLocaleDateString("fa-IR", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
     };
 
-    setMessages((prev) => [...prev, userMessage]);
-    setIsLoading(true);
+    // Handle user message
+    const handleSendMessage = async (content: string) => {
+      if (readOnly) return; // در حالت مشاهده تاریخچه اجازه چت نیست
 
-    // Simulate AI processing
-    setTimeout(() => {
-      // AI "thinking" message
-      const thinkingMessage: ChatMessage = {
-        id: `thinking-${Date.now()}`,
-        sender: "ai",
+      const userMessage: ChatMessage = {
+        id: `msg-${Date.now()}`,
+        sender: "user",
         type: "text",
-        content: "🔍 در حال تحلیل علائم شما...",
+        content,
         timestamp: new Date().toISOString(),
+        dateGroup: getDateGroup(),
       };
-      setMessages((prev) => [...prev, thinkingMessage]);
 
-      // After "thinking", show symptoms
+      setMessages((prev) => [...prev, userMessage]);
+      setIsLoading(true);
+
       setTimeout(() => {
-        setMessages((prev) => prev.filter((m) => m.id !== thinkingMessage.id));
-
-        // Detect symptoms from message (mock)
-        const detectedSymptoms = detectSymptoms(content);
-        const symptomBoxes = detectedSymptoms.map((type, i) =>
-          createSymptomData(type, `symptom-${Date.now()}-${i}`)
-        );
-
-        const aiMessage: ChatMessage = {
-          id: `ai-${Date.now()}`,
+        const thinkingMessage: ChatMessage = {
+          id: `thinking-${Date.now()}`,
           sender: "ai",
-          type: "symptoms",
-          content: "✨ علائم زیر از پیام شما شناسایی شد. لطفاً جزئیات هر کدام را تکمیل کنید:",
-          symptoms: symptomBoxes,
+          type: "text",
+          content: "🔍 در حال تحلیل علائم شما...",
           timestamp: new Date().toISOString(),
         };
+        setMessages((prev) => [...prev, thinkingMessage]);
 
-        setMessages((prev) => [...prev, aiMessage]);
-        setPendingSymptoms(symptomBoxes);
-        setIsLoading(false);
-      }, 2000);
-    }, 500);
-  };
+        setTimeout(() => {
+          setMessages((prev) => prev.filter((m) => m.id !== thinkingMessage.id));
 
-  // Simple symptom detection (mock)
-  const detectSymptoms = (text: string): string[] => {
-    const symptoms: string[] = [];
-    const lowerText = text.toLowerCase();
-    
-    if (lowerText.includes("تب") || lowerText.includes("گرم") || lowerText.includes("لرز")) {
-      symptoms.push("fever");
-    }
-    if (lowerText.includes("سرفه") || lowerText.includes("خلط")) {
-      symptoms.push("cough");
-    }
-    if (lowerText.includes("درد") || lowerText.includes("کمر درد") || lowerText.includes("درد بدن")) {
-      symptoms.push("pain");
-    }
-    if (lowerText.includes("سردرد") || lowerText.includes("سر درد") || lowerText.includes("میگرن")) {
-      symptoms.push("headache");
-    }
-    if (lowerText.includes("استفراغ") || lowerText.includes("بالا آوردن") || lowerText.includes("حالت تهوع")) {
-      symptoms.push("vomiting");
-    }
-    if (lowerText.includes("پوست") || lowerText.includes("جوش") || lowerText.includes("ضایعه") || lowerText.includes("راش")) {
-      symptoms.push("skin_lesion");
-    }
+          const detectedSymptoms = detectSymptoms(content);
+          const symptomBoxes = detectedSymptoms.map((type, i) =>
+            createSymptomData(type, `symptom-${Date.now()}-${i}`)
+          );
 
-    // Default if no symptoms detected
-    if (symptoms.length === 0) {
-      symptoms.push("pain", "fever");
-    }
+          const existingTypes = new Set(pendingSymptoms.map((s) => s.type));
+          const newUniqueSymptoms = symptomBoxes.filter((s) => !existingTypes.has(s.type));
 
-    return symptoms;
-  };
+          if (newUniqueSymptoms.length === 0) {
+            const noNewSymptomsMessage: ChatMessage = {
+              id: `ai-${Date.now()}`,
+              sender: "ai",
+              type: "text",
+              content: "✅ این علائم قبلاً ثبت شده‌اند. لطفاً علائم جدید رو از دکمه 'اضافه کردن علامت' انتخاب کنید.",
+              timestamp: new Date().toISOString(),
+            };
+            setMessages((prev) => [...prev, noNewSymptomsMessage]);
+            setIsLoading(false);
+            return;
+          }
 
-  // Handle symptom update
-  const handleSymptomUpdate = (updatedSymptom: SymptomData) => {
-    setMessages((prev) =>
-      prev.map((msg) => {
-        if (msg.symptoms) {
-          return {
-            ...msg,
-            symptoms: msg.symptoms.map((s) =>
-              s.id === updatedSymptom.id ? updatedSymptom : s
-            ),
+          const aiMessage: ChatMessage = {
+            id: `ai-${Date.now()}`,
+            sender: "ai",
+            type: "symptoms",
+            content: `✨ علائم جدید زیر از پیام شما شناسایی شد:`,
+            symptoms: newUniqueSymptoms,
+            timestamp: new Date().toISOString(),
           };
-        }
-        return msg;
-      })
-    );
-    setPendingSymptoms((prev) =>
-      prev.map((s) => (s.id === updatedSymptom.id ? updatedSymptom : s))
-    );
-  };
 
-  // Handle symptom remove
-  const handleSymptomRemove = (symptomId: string) => {
-    setMessages((prev) =>
-      prev.map((msg) => {
-        if (msg.symptoms) {
-          return {
-            ...msg,
-            symptoms: msg.symptoms.filter((s) => s.id !== symptomId),
-          };
-        }
-        return msg;
-      })
-    );
-    setPendingSymptoms((prev) => prev.filter((s) => s.id !== symptomId));
-  };
+          setMessages((prev) => [...prev, aiMessage]);
+          setPendingSymptoms((prev) => [...prev, ...newUniqueSymptoms]);
+          setIsLoading(false);
+        }, 2000);
+      }, 500);
+    };
 
-  // Handle confirm all symptoms
-  const handleConfirmAll = () => {
-    const allCompleted = pendingSymptoms.every((s) => s.completed);
-    if (!allCompleted) {
-      // Auto-complete symptoms that don't require details
-      const autoCompleted = pendingSymptoms.map((s) =>
-        !s.requiresDetails ? { ...s, completed: true } : s
-      );
-      setPendingSymptoms(autoCompleted);
+    // Simple symptom detection (mock)
+    const detectSymptoms = (text: string): string[] => {
+      const symptoms: string[] = [];
+      const lowerText = text.toLowerCase();
+      const existingTypes = new Set(pendingSymptoms.map((s) => s.type));
+
+      if ((lowerText.includes("تب") || lowerText.includes("گرم") || lowerText.includes("لرز")) && !existingTypes.has("fever")) {
+        symptoms.push("fever");
+      }
+      if ((lowerText.includes("سرفه") || lowerText.includes("خلط")) && !existingTypes.has("cough")) {
+        symptoms.push("cough");
+      }
+      if ((lowerText.includes("درد") || lowerText.includes("کمر درد") || lowerText.includes("درد بدن")) && !existingTypes.has("pain")) {
+        symptoms.push("pain");
+      }
+      if ((lowerText.includes("سردرد") || lowerText.includes("سر درد") || lowerText.includes("میگرن")) && !existingTypes.has("headache")) {
+        symptoms.push("headache");
+      }
+      if ((lowerText.includes("استفراغ") || lowerText.includes("بالا آوردن") || lowerText.includes("حالت تهوع")) && !existingTypes.has("vomiting")) {
+        symptoms.push("vomiting");
+      }
+      if ((lowerText.includes("پوست") || lowerText.includes("جوش") || lowerText.includes("ضایعه") || lowerText.includes("راش")) && !existingTypes.has("skin_lesion")) {
+        symptoms.push("skin_lesion");
+      }
+
+      if (symptoms.length === 0 && pendingSymptoms.length === 0) {
+        symptoms.push("pain", "fever");
+      }
+
+      return symptoms;
+    };
+
+    // Handle symptom update
+    const handleSymptomUpdate = (updatedSymptom: SymptomData) => {
+      if (readOnly) return;
       setMessages((prev) =>
         prev.map((msg) => {
           if (msg.symptoms) {
-            return { ...msg, symptoms: autoCompleted };
+            return {
+              ...msg,
+              symptoms: msg.symptoms.map((s) =>
+                s.id === updatedSymptom.id ? updatedSymptom : s
+              ),
+            };
           }
           return msg;
         })
       );
-    }
-
-    setAllConfirmed(true);
-    
-    // Add confirmation message
-    const confirmMessage: ChatMessage = {
-      id: `confirm-${Date.now()}`,
-      sender: "user",
-      type: "text",
-      content: "✅ تمام علائم تأیید شدند",
-      timestamp: new Date().toISOString(),
+      setPendingSymptoms((prev) =>
+        prev.map((s) => (s.id === updatedSymptom.id ? updatedSymptom : s))
+      );
     };
-    setMessages((prev) => [...prev, confirmMessage]);
 
-    // AI response
-    setTimeout(() => {
+    // Handle symptom remove
+    const handleSymptomRemove = (symptomId: string) => {
+      if (readOnly) return;
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (msg.symptoms) {
+            return {
+              ...msg,
+              symptoms: msg.symptoms.filter((s) => s.id !== symptomId),
+            };
+          }
+          return msg;
+        })
+      );
+      setPendingSymptoms((prev) => prev.filter((s) => s.id !== symptomId));
+    };
+
+    // Handle confirm all symptoms
+    const handleConfirmAll = () => {
+      if (readOnly) return;
+      const allCompleted = pendingSymptoms.every((s) => s.completed);
+      if (!allCompleted) {
+        const errorMessage: ChatMessage = {
+          id: `error-${Date.now()}`,
+          sender: "ai",
+          type: "text",
+          content: "⚠️ لطفاً تمام علائم را تکمیل کنید (شدت، مدت و توضیحات را وارد کنید).",
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, errorMessage]);
+        return;
+      }
+
+      setAllConfirmed(true);
+
+      const confirmMessage: ChatMessage = {
+        id: `confirm-${Date.now()}`,
+        sender: "user",
+        type: "text",
+        content: "✅ تمام علائم تأیید شدند",
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, confirmMessage]);
+
       const aiResponse: ChatMessage = {
         id: `ai-response-${Date.now()}`,
         sender: "ai",
         type: "text",
-        content: "عالی! اطلاعات شما ثبت شد. آیا علامت دیگری دارید یا می‌خواهید ویزیت را برای پزشک ارسال کنید؟",
+        content: "🔄 در حال ارسال اطلاعات به پزشک...",
         timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, aiResponse]);
-    }, 1000);
-  };
 
-  // Handle add symptoms from selector
-  const handleAddSymptoms = (selected: SymptomOption[]) => {
-    const newSymptoms = selected.map((opt, i) => createSymptomData(opt.type, `symptom-add-${Date.now()}-${i}`));
-    
-    // Add as user message with symptoms on right side
-    const userSymptomMessage: ChatMessage = {
-      id: `user-symptoms-${Date.now()}`,
-      sender: "user",
-      type: "symptoms",
-      content: `علائم اضافه شده: ${selected.map((s) => s.label).join("، ")}`,
-      symptoms: newSymptoms,
-      timestamp: new Date().toISOString(),
+      setTimeout(() => {
+        onSendToDoctor();
+        const successMessage: ChatMessage = {
+          id: `success-${Date.now()}`,
+          sender: "ai",
+          type: "text",
+          content: "✅ اطلاعات شما با موفقیت به پزشک ارسال شد.",
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, successMessage]);
+      }, 500);
     };
 
-    setMessages((prev) => [...prev, userSymptomMessage]);
-    setPendingSymptoms((prev) => [...prev, ...newSymptoms]);
-    setShowSymptomSelector(false);
-    setAllConfirmed(false);
-  };
+    // Handle add symptoms from selector
+    const handleAddSymptoms = (selected: SymptomOption[]) => {
+      if (readOnly) return;
+      const newSymptoms = selected.map((opt, i) =>
+        createSymptomData(opt.type, `symptom-add-${Date.now()}-${i}`)
+      );
 
-  // Get existing symptom types
-  const getExistingTypes = () => {
-    const types = new Set<string>();
-    messages.forEach((msg) => {
-      msg.symptoms?.forEach((s) => types.add(s.type));
-    });
-    return Array.from(types);
-  };
+      const userSymptomMessage: ChatMessage = {
+        id: `user-symptoms-${Date.now()}`,
+        sender: "user",
+        type: "symptoms",
+        content: `➕ علائم اضافه شده: ${selected.map((s) => s.label).join("، ")}`,
+        symptoms: newSymptoms,
+        timestamp: new Date().toISOString(),
+      };
 
-  // Group messages by date
-  const groupedMessages = messages.reduce((groups, msg) => {
-    const date = msg.dateGroup || getDateGroup();
-    if (!groups[date]) groups[date] = [];
-    groups[date].push(msg);
-    return groups;
-  }, {} as Record<string, ChatMessage[]>);
+      setMessages((prev) => [...prev, userSymptomMessage]);
+      setPendingSymptoms((prev) => [...prev, ...newSymptoms]);
+      setShowSymptomSelector(false);
+      setAllConfirmed(false);
+    };
 
-  return (
-    <div className="flex flex-col h-full bg-background">
-      {/* Chat Header */}
-      <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-card/95 backdrop-blur-sm">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center shadow-lg shadow-violet-500/20">
-            <Sparkles className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h3 className="font-bold text-sm text-foreground">ویزیت هوشمند</h3>
-            <p className="text-xs text-muted-foreground flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-healing-500 animate-pulse" />
-              هوش مصنوعی فعال
-            </p>
-          </div>
-        </div>
-        
-        {allConfirmed && (
-          <Button
-            onClick={onSendToDoctor}
-            size="sm"
-            className="h-9 text-xs bg-gradient-to-r from-trust-500 to-healing-500 hover:from-trust-600 hover:to-healing-600 text-white shadow-lg shadow-trust-500/25"
-          >
-            <Send className="w-3.5 h-3.5 ml-1" />
-            ارسال به پزشک
-          </Button>
-        )}
-      </div>
+    // Get existing symptom types
+    const getExistingTypes = () => {
+      const types = new Set<string>();
+      messages.forEach((msg) => {
+        msg.symptoms?.forEach((s) => types.add(s.type));
+      });
+      pendingSymptoms.forEach((s) => types.add(s.type));
+      return Array.from(types);
+    };
 
-      {/* Messages Area */}
-      <div
-        ref={chatContainerRef}
-        className="flex-1 overflow-y-auto p-4 space-y-6"
-      >
-        {/* Welcome Message */}
-        {messages.length === 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-center py-12 space-y-4"
-          >
-            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center mx-auto shadow-lg shadow-violet-500/20">
-              <Sparkles className="w-10 h-10 text-white" />
+    // Group messages by date
+    const groupedMessages = messages.reduce((groups, msg) => {
+      const date = msg.dateGroup || getDateGroup();
+      if (!groups[date]) groups[date] = [];
+      groups[date].push(msg);
+      return groups;
+    }, {} as Record<string, ChatMessage[]>);
+
+    return (
+      <div className="flex flex-col h-full bg-background">
+        {/* Chat Header */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-card/95 backdrop-blur-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center shadow-lg shadow-violet-500/20">
+              <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-foreground">ویزیت هوشمند</h3>
-              <p className="text-sm text-muted-foreground max-w-sm mx-auto mt-2">
-                علائم خود را بنویسید. هوش مصنوعی ما آن‌ها را تحلیل کرده و به پزشک ارسال می‌کند.
+              <h3 className="font-bold text-sm text-foreground">
+                {readOnly ? "مشاهده ویزیت قبلی" : "ویزیت هوشمند"}
+              </h3>
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <span className={cn(
+                  "w-1.5 h-1.5 rounded-full",
+                  readOnly ? "bg-muted-foreground" : "bg-healing-500 animate-pulse"
+                )} />
+                {readOnly ? "فقط خواندنی" : "هوش مصنوعی فعال"}
               </p>
             </div>
-            <div className="flex flex-wrap gap-2 justify-center max-w-md mx-auto">
-              {["تب و لرز دارم", "سردرد شدید", "درد در قفسه سینه", "ضایعه پوستی در دست"].map((suggestion) => (
-                <button
-                  key={suggestion}
-                  onClick={() => handleSendMessage(suggestion)}
-                  className="px-3 py-1.5 rounded-full bg-muted hover:bg-trust-50 dark:hover:bg-trust-900/20 text-xs text-muted-foreground hover:text-trust-600 transition-colors border border-border"
-                >
-                  {suggestion}
-                </button>
+          </div>
+        </div>
+
+        {/* Messages Area */}
+        <div
+          ref={chatContainerRef}
+          className="flex-1 overflow-y-auto p-4 space-y-6"
+        >
+          {/* Welcome Message */}
+          {messages.length === 0 && !readOnly && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-center py-12 space-y-4"
+            >
+              <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center mx-auto shadow-lg shadow-violet-500/20">
+                <Sparkles className="w-10 h-10 text-white" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-foreground">ویزیت هوشمند</h3>
+                <p className="text-sm text-muted-foreground max-w-sm mx-auto mt-2">
+                  علائم خود را بنویسید. هوش مصنوعی ما آن‌ها را تحلیل کرده و به پزشک ارسال می‌کند.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 justify-center max-w-md mx-auto">
+                {["تب و لرز دارم", "سردرد شدید", "درد در قفسه سینه", "ضایعه پوستی در دست"].map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    onClick={() => handleSendMessage(suggestion)}
+                    className="px-3 py-1.5 rounded-full bg-muted hover:bg-trust-50 dark:hover:bg-trust-900/20 text-xs text-muted-foreground hover:text-trust-600 transition-colors border border-border"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {/* Grouped Messages */}
+          {Object.entries(groupedMessages).map(([date, msgs]) => (
+            <div key={date} className="space-y-4">
+              {/* Date Divider */}
+              <div className="flex items-center justify-center">
+                <div className="bg-muted px-3 py-1 rounded-full">
+                  <span className="text-[10px] text-muted-foreground font-medium">{date}</span>
+                </div>
+              </div>
+
+              {/* Messages */}
+              {msgs.map((message) => (
+                <ChatMessageComponent
+                  key={message.id}
+                  message={message}
+                  onSymptomUpdate={handleSymptomUpdate}
+                  onSymptomRemove={handleSymptomRemove}
+                />
               ))}
             </div>
-          </motion.div>
-        )}
+          ))}
 
-        {/* Grouped Messages */}
-        {Object.entries(groupedMessages).map(([date, msgs]) => (
-          <div key={date} className="space-y-4">
-            {/* Date Divider */}
-            <div className="flex items-center justify-center">
-              <div className="bg-muted px-3 py-1 rounded-full">
-                <span className="text-[10px] text-muted-foreground font-medium">{date}</span>
-              </div>
-            </div>
-
-            {/* Messages */}
-            {msgs.map((message) => (
-              <ChatMessageComponent
-                key={message.id}
-                message={message}
-                onSymptomUpdate={handleSymptomUpdate}
-                onSymptomRemove={handleSymptomRemove}
-              />
-            ))}
-          </div>
-        ))}
-
-        {/* Action Buttons after AI symptoms */}
-        {pendingSymptoms.length > 0 && !allConfirmed && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex gap-2 justify-center pt-2"
-          >
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowSymptomSelector(true)}
-              className="h-9 text-xs border-dashed border-trust-300 hover:bg-trust-50 dark:hover:bg-trust-900/20"
+          {/* Action Buttons after AI symptoms (فقط در حالت چت عادی) */}
+          {pendingSymptoms.length > 0 && !allConfirmed && !readOnly && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex gap-2 justify-center pt-2"
             >
-              <Plus className="w-3.5 h-3.5 ml-1" />
-              اضافه کردن علامت
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleConfirmAll}
-              className="h-9 text-xs bg-gradient-to-r from-trust-500 to-healing-500 hover:from-trust-600 hover:to-healing-600 text-white shadow-lg shadow-trust-500/25"
-            >
-              <Check className="w-3.5 h-3.5 ml-1" />
-              تأیید همه علائم
-            </Button>
-          </motion.div>
-        )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowSymptomSelector(true)}
+                className="h-9 text-xs border-dashed border-trust-300 hover:bg-trust-50 dark:hover:bg-trust-900/20"
+              >
+                <Plus className="w-3.5 h-3.5 ml-1" />
+                اضافه کردن علامت
+              </Button>
 
-        <div ref={messagesEndRef} />
+              <Button
+                size="sm"
+                onClick={handleConfirmAll}
+                disabled={!pendingSymptoms.every((s) => s.completed)}
+                className={cn(
+                  "h-9 text-xs text-white shadow-lg shadow-trust-500/25",
+                  pendingSymptoms.every((s) => s.completed)
+                    ? "bg-gradient-to-r from-trust-500 to-healing-500 hover:from-trust-600 hover:to-healing-600 cursor-pointer"
+                    : "bg-gray-400 dark:bg-gray-600 cursor-not-allowed opacity-60"
+                )}
+              >
+                <Check className="w-3.5 h-3.5 ml-1" />
+                {pendingSymptoms.every((s) => s.completed)
+                  ? "تأیید و ارسال به پزشک"
+                  : `${pendingSymptoms.filter((s) => !s.completed).length} علامت ناقص`}
+              </Button>
+            </motion.div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input (در حالت readOnly غیرفعال) */}
+        <ChatInput
+          onSend={handleSendMessage}
+          disabled={isLoading || readOnly}
+          isLoading={isLoading}
+        />
+
+        {/* Symptom Selector Modal */}
+        <SymptomSelector
+          isOpen={showSymptomSelector}
+          onClose={() => setShowSymptomSelector(false)}
+          onAdd={handleAddSymptoms}
+          existingTypes={getExistingTypes()}
+        />
       </div>
+    );
+  }
+);
 
-      {/* Input */}
-      <ChatInput onSend={handleSendMessage} disabled={isLoading} isLoading={isLoading} />
+SymptomChat.displayName = "SymptomChat";
 
-      {/* Symptom Selector Modal */}
-      <SymptomSelector
-        isOpen={showSymptomSelector}
-        onClose={() => setShowSymptomSelector(false)}
-        onAdd={handleAddSymptoms}
-        existingTypes={getExistingTypes()}
-      />
-    </div>
-  );
-}
+export default SymptomChat;
 
 ──────────────────────────────────────────────────────────────────────
 📄 components/visit/SymptomSelector.tsx
@@ -5647,6 +5812,7 @@ export function createSymptomData(type: string, id: string): SymptomData {
 ──────────────────────────────────────────────────────────────────────
 "use client";
 
+import { useState } from "react";
 import { motion } from "framer-motion";
 import {
   Stethoscope,
@@ -5674,15 +5840,29 @@ const statusConfig = {
 };
 
 export default function VisitSidebar({ visits, selectedVisitId, onSelectVisit, onNewVisit }: VisitSidebarProps) {
+  const [search, setSearch] = useState("");
+
+  // فیلتر ویزیت‌ها بر اساس عنوان یا نام پزشک
+  const filteredVisits = visits.filter((visit) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      visit.title.toLowerCase().includes(q) ||
+      visit.doctorName.toLowerCase().includes(q)
+    );
+  });
+
   return (
     <div className="w-full h-full flex flex-col bg-card border-l border-border">
       {/* Header */}
       <div className="p-4 border-b border-border space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-sm text-foreground">ویزیت‌های قبلی</h3>
-          <span className="text-xs text-muted-foreground">{visits.length} ویزیت</span>
+          <span className="text-xs text-muted-foreground">
+            {search ? `${filteredVisits.length} نتیجه` : `${visits.length} ویزیت`}
+          </span>
         </div>
-        
+
         {/* New Visit Button */}
         <Button
           onClick={onNewVisit}
@@ -5697,7 +5877,9 @@ export default function VisitSidebar({ visits, selectedVisitId, onSelectVisit, o
           <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
-            placeholder="جستجو..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="جستجو در عنوان یا نام پزشک..."
             className="w-full pr-9 pl-3 py-2 rounded-xl border bg-background text-xs focus:outline-none focus:ring-2 focus:ring-trust-500/30 focus:border-trust-500"
           />
         </div>
@@ -5705,7 +5887,13 @@ export default function VisitSidebar({ visits, selectedVisitId, onSelectVisit, o
 
       {/* Visit List */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {visits.map((visit, index) => {
+        {filteredVisits.length === 0 && (
+          <div className="text-center py-8 text-xs text-muted-foreground">
+            ویزیتی با این مشخصات پیدا نشد
+          </div>
+        )}
+
+        {filteredVisits.map((visit, index) => {
           const status = statusConfig[visit.status];
           const StatusIcon = status.icon;
           const isSelected = selectedVisitId === visit.id;
@@ -5742,7 +5930,7 @@ export default function VisitSidebar({ visits, selectedVisitId, onSelectVisit, o
                     {visit.title}
                   </h4>
                   <p className="text-xs text-muted-foreground truncate">{visit.doctorName}</p>
-                  
+
                   {/* Symptoms Tags */}
                   <div className="flex flex-wrap gap-1 mt-1.5">
                     {visit.symptoms.slice(0, 2).map((symptom, i) => (
@@ -5900,6 +6088,7 @@ export const setTokens = (tokens: AuthTokens) => {
     localStorage.setItem("access_token", tokens.access_token);
     localStorage.setItem("refresh_token", tokens.refresh_token);
     localStorage.setItem("token_expires_at", String(Date.now() + tokens.expires_in * 1000));
+    document.cookie = `access_token=${tokens.access_token}; path=/; max-age=${tokens.expires_in}; SameSite=Lax`;
   }
 };
 
@@ -5923,6 +6112,7 @@ export const clearTokens = () => {
     localStorage.removeItem("refresh_token");
     localStorage.removeItem("token_expires_at");
     localStorage.removeItem("user");
+    document.cookie = "access_token=; path=/; max-age=0";
   }
 };
 
@@ -6237,7 +6427,7 @@ export async function getSession(): Promise<JWTPayload | null> {
 }
 
 export async function isAuthenticated(): Promise<boolean> {
-  return true;
+  //return true;
   return !!(await getSession());
 }
 
@@ -6274,6 +6464,227 @@ export function formatRelativeTime(date: string | Date): string {
   if (diffHours < 24) return `${diffHours} ساعت پیش`;
   if (diffDays < 7) return `${diffDays} روز پیش`;
   return formatDate(d);
+}
+
+──────────────────────────────────────────────────────────────────────
+📄 lib/visit-service.ts
+──────────────────────────────────────────────────────────────────────
+// lib/visit-service.ts
+import type { ChatMessage, SymptomData, VisitHistory } from "@/types/visit";
+import { createSymptomData, symptomCategories } from "@/components/visit/SymptomTemplates";
+import { refreshToken, clearTokens } from "@/lib/auth-api";
+
+// از rewrite داخل next.config استفاده می‌کنیم → بدون مشکل CORS
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api/gateway";
+
+// ==================== Backend response types ====================
+
+interface ApiVisit {
+  id: string;
+  medical_record_id: string | null;
+  doctor_id: string | null;
+  status: string;
+  chief_complaint: string | null;
+  started_at: string;
+}
+
+interface ApiMessage {
+  id: string;
+  sender_type: string;   // patient | ai | system
+  message_type: string;  // text | file
+  content: string | null;
+  attachment_url: string | null;
+  sent_at: string;
+}
+
+interface ApiSymptom {
+  id: string;
+  symptom_name: string;
+  source: string;
+  severity: string | null;           // mild | moderate | severe
+  body_part: string | null;
+  duration_description: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+// ==================== Helpers ====================
+
+function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("access_token");
+}
+
+async function apiFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers ?? {}),
+    },
+  });
+
+  if (res.status === 401 && retry) {
+    // یک بار تلاش برای رفرش توکن
+    const refreshed = await refreshToken();
+    if (refreshed.success) {
+      return apiFetch<T>(path, options, false);
+    }
+    // رفرش هم ممکن نبود → پاک کردن و رفتن به لاگین
+    clearTokens();
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
+    throw new Error("نشست شما منقضی شده است. لطفاً دوباره وارد شوید.");
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    const detail = err?.detail;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((d) => d.msg).join(" | ")   // خطاهای 422 FastAPI
+          : `خطای سرور (${res.status})`;
+    throw new Error(message);
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json();
+}
+
+// ==================== Mappings ====================
+
+const STATUS_MAP: Record<string, VisitHistory["status"]> = {
+  intake: "pending",
+  ai_processing: "pending",
+  doctor_assigned: "pending",
+  in_chat: "in_progress",
+  prescription_pending: "in_progress",
+  completed: "completed",
+  closed: "completed",
+  cancelled: "completed",
+};
+
+const SEVERITY_TO_NUMBER: Record<string, 3 | 6 | 9> = {
+  mild: 3, moderate: 6, severe: 9,
+};
+
+function severityFromNumber(n: number): "mild" | "moderate" | "severe" {
+  return n <= 3 ? "mild" : n <= 7 ? "moderate" : "severe";
+}
+
+function findTypeByLabel(label: string): string {
+  for (const cat of symptomCategories) {
+    const opt = cat.symptoms.find((s) => s.label === label);
+    if (opt) return opt.type;
+  }
+  return label;
+}
+
+function toVisitHistory(v: ApiVisit): VisitHistory {
+  return {
+    id: v.id,
+    title: v.chief_complaint ?? "ویزیت آنلاین",
+    doctorName: v.doctor_id ? "پزشک متخصص" : "در انتظار تخصیص پزشک",
+    date: v.started_at,
+    status: STATUS_MAP[v.status] ?? "pending",
+    icon: "Stethoscope",
+    iconColor: "text-trust-500",
+    bgColor: "bg-trust-50 dark:bg-trust-900/20",
+    symptoms: [],
+  };
+}
+
+// ==================== Public API (names unchanged → no page.tsx change) ====================
+
+// لیست ویزیت‌های بیمار
+export async function fetchVisits(): Promise<VisitHistory[]> {
+  const data = await apiFetch<{ total: number; visits: ApiVisit[] }>("/api/intake/visits");
+  return data.visits.map(toVisitHistory);
+}
+
+// جزئیات یک ویزیت → تبدیل به ChatMessage[] برای نمایش در چت
+export async function fetchVisitDetail(visitId: string): Promise<ChatMessage[]> {
+  const [msgs, symptoms] = await Promise.all([
+    apiFetch<ApiMessage[]>(`/api/intake/visits/${visitId}/messages`),
+    apiFetch<ApiSymptom[]>(`/api/intake/visits/${visitId}/symptoms`),
+  ]);
+
+  const chat: ChatMessage[] = msgs.map((m) => ({
+    id: m.id,
+    sender: m.sender_type === "patient" ? "user" : m.sender_type === "doctor" ? "doctor" : "ai",
+    type: "text",
+    content: m.content ?? undefined,
+    timestamp: m.sent_at,
+  }));
+
+  if (symptoms.length > 0) {
+    const boxes: SymptomData[] = symptoms.map((s) => {
+      const box = createSymptomData(findTypeByLabel(s.symptom_name), s.id);
+      box.completed = true;
+      if (box.details) {
+        if (s.severity) box.details.severity = SEVERITY_TO_NUMBER[s.severity] ?? 5;
+        if (s.body_part) box.details.bodyParts = [s.body_part];
+        box.details.duration = s.duration_description ?? "";
+        box.details.description = s.notes ?? "";
+      }
+      return box;
+    });
+
+    chat.push({
+      id: `symptoms-${visitId}`,
+      sender: "ai",
+      type: "symptoms",
+      content: "علائم ثبت‌شده در این ویزیت:",
+      symptoms: boxes,
+      timestamp: symptoms[0].created_at,
+    });
+  }
+
+  return chat;
+}
+
+// ذخیره کامل یک ویزیت: ساخت ویزیت ← پیام‌های کاربر ← علائم ← submit برای AI
+export async function saveVisit(payload: {
+  messages: ChatMessage[];
+  symptoms: SymptomData[];
+}): Promise<string> {
+  const firstUserMsg = payload.messages.find((m) => m.sender === "user")?.content;
+
+  const visit = await apiFetch<ApiVisit>("/api/intake/visits", {
+    method: "POST",
+    body: JSON.stringify({
+      chief_complaint: firstUserMsg ? firstUserMsg.slice(0, 200) : undefined,
+    }),
+  });
+
+  for (const m of payload.messages) {
+    if (m.sender === "user" && m.content) {
+      await apiFetch(`/api/intake/visits/${visit.id}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ content: m.content }),
+      });
+    }
+  }
+
+  for (const s of payload.symptoms) {
+    await apiFetch(`/api/intake/visits/${visit.id}/symptoms`, {
+      method: "POST",
+      body: JSON.stringify({
+        symptom_name: s.label,                 // فارسی برای ParserBERT
+        severity: s.details?.severity ? severityFromNumber(s.details.severity) : undefined,
+        body_part: s.details?.bodyParts?.[0],
+        duration_description: s.details?.duration || undefined,
+        notes: s.details?.description || undefined,
+      }),
+    });
+  }
+
+  await apiFetch(`/api/intake/visits/${visit.id}/submit`, { method: "POST" });
+  return visit.id;
 }
 
 ──────────────────────────────────────────────────────────────────────

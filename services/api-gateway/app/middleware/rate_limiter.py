@@ -16,6 +16,7 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         self.auth_limit = settings.RATE_LIMIT_AUTH
         self.ai_triage_limit = settings.RATE_LIMIT_AI_TRIAGE
         self.profile_limit = settings.RATE_LIMIT_PROFILE
+        self.intake_limit = settings.RATE_LIMIT_INTAKE
     
     def _get_key(self, identifier: str, window: int) -> str:
         current_window = int(time.time()) // window
@@ -79,19 +80,20 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
                 response.headers["X-RateLimit-Remaining"] = str(remaining)
                 return response
         
-        if path.startswith("/api/intake/") and "ai" in path:
+        intake_paths = ["/api/intake/"]
+        if any(path.startswith(p) for p in intake_paths):
             user_id = getattr(request.state, "user_id", None)
             if user_id:
-                identifier = f"user:{user_id}:ai"
+                identifier = f"user:{user_id}:intake"
                 allowed, remaining, reset_after = self._check_limit(
-                    self._get_key(identifier, 60), self.ai_triage_limit
+                    self._get_key(identifier, 60), self.intake_limit
                 )
                 if not allowed:
                     return JSONResponse(
                         status_code=429,
                         content={
-                            "detail": "Access from this IP address has been rate-limited for AI Triage",
-                            "code": "AI_RATE_LIMIT_EXCEEDED",
+                            "detail": "Visit intake rate limit exceeded",
+                            "code": "INTAKE_RATE_LIMIT_EXCEEDED",
                             "retry_after": reset_after
                         },
                         headers={"Retry-After": str(reset_after)}

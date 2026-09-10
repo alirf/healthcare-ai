@@ -18,7 +18,7 @@ export default function Footer() {
             <Link href="/about" className="hover:text-foreground transition-colors">درباره ما</Link>
             <Link href="/terms" className="hover:text-foreground transition-colors">قوانین</Link>
             <Link href="/privacy" className="hover:text-foreground transition-colors">حریم خصوصی</Link>
-            <Link href="/contact" className="hover:text-foreground transition-colors">تماس</Link>
+            <Link href="/dashboard/support" className="hover:text-foreground transition-colors">پشتیبانی</Link>
           </div>
           <div className="flex items-center gap-1 text-sm text-muted-foreground">
             <span>© ۲۰۲۶</span>

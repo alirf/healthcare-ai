@@ -48,46 +48,29 @@ export default function VisitPage() {
 
   // ========== ویزیت جدید ==========
   const handleNewVisit = () => {
-    const chat = chatRef.current;
+  const chat = chatRef.current;
 
-    // حالت ۱: کاربر چتی نکرده → فقط ریست، بدون ذخیره
-    if (!chat || !chat.hasUserChatted()) {
-      setSelectedVisitId(undefined);
-      setHistoryMessages(null);
-      setChatKey((k) => k + 1);
-      return;
-    }
-
-    // حالت ۲: کاربر چت کرده → ویزیت فعلی به تاریخچه اضافه می‌شود
-    const snapshot = chat.getVisitSnapshot();
-    const firstUserMsg =
-      snapshot.messages.find((m) => m.sender === "user")?.content ?? "ویزیت جدید";
-    const symptomLabels = snapshot.symptoms.map(
-      (s) => SYMPTOM_LABELS[s.type] ?? s.type
-    );
-
-    const newVisit: VisitHistory = {
-      id: `visit-${Date.now()}`,
-      title: firstUserMsg.length > 40 ? firstUserMsg.slice(0, 40) + "…" : firstUserMsg,
-      doctorName: "در انتظار تخصیص پزشک",
-      symptoms: symptomLabels,
-      status: "pending",
-      date: new Date().toISOString(),
-      bgColor: "bg-violet-50 dark:bg-violet-900/20",
-      iconColor: "text-violet-500",
-      icon: "Stethoscope",
-    };
-
-    // ذخیره روی سرور (بدون await تا UI قفل نشود)
-    saveVisit({ messages: snapshot.messages, symptoms: snapshot.symptoms }).catch(
-      (err) => console.error("خطا در ذخیره ویزیت:", err)
-    );
-
-    setVisits((prev) => [newVisit, ...prev]);
+  // حالت ۱: کاربر چتی نکرده → فقط ریست
+  if (!chat || !chat.hasUserChatted()) {
     setSelectedVisitId(undefined);
     setHistoryMessages(null);
-    setChatKey((k) => k + 1); // شروع ویزیت جدید
-  };
+    setChatKey((k) => k + 1);
+    return;
+  }
+
+  // حالت ۲: ذخیره روی سرور و بعد تازه‌سازی لیست از سرور
+  const snapshot = chat.getVisitSnapshot();
+  saveVisit({ messages: snapshot.messages, symptoms: snapshot.symptoms })
+    .then(async () => {
+      const fresh = await fetchVisits();   // آیدی‌های واقعی از دیتابیس
+      setVisits(fresh);
+    })
+    .catch((err) => console.error("خطا در ذخیره ویزیت:", err));
+
+  setSelectedVisitId(undefined);
+  setHistoryMessages(null);
+  setChatKey((k) => k + 1);
+};
 
   // ========== انتخاب ویزیت قبلی ==========
   const handleSelectVisit = async (visit: VisitHistory) => {
