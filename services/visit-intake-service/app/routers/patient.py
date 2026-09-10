@@ -29,6 +29,7 @@ from app.schemas.clinical import (
 )
 from app.services.visit_service import VisitService
 from app.services.storage_service import StorageService
+from app.services.record_sync import sync_visit_to_record
 
 router = APIRouter(prefix="/visits", tags=["Visit Intake"])
 
@@ -72,7 +73,18 @@ async def create_visit(
 ):
     """Start a new visit. Optionally attach it to an existing medical record."""
     service = VisitService(db)
-    return await service.create_visit(get_user_id(current_user), data)
+    patient_id = get_user_id(current_user)
+    visit = await service.create_visit(patient_id, data)
+
+    if visit.medical_record_id is not None:
+        await sync_visit_to_record(
+            medical_record_id=visit.medical_record_id,
+            visit_id=visit.id,
+            patient_id=patient_id,
+            added_by=patient_id,
+        )
+
+    return visit
 
 
 @router.get("", response_model=VisitListResponse)

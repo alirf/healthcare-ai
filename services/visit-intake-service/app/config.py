@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # Internal API Security (AI services call these endpoints)
     INTERNAL_API_KEY: str = ""
 
+    # medical-record-service (sync hook: register visits on records)
+    MEDICAL_RECORD_SERVICE_URL: str = "http://localhost:8005"
+
     # File Upload
     MAX_ATTACHMENT_SIZE_MB: int = 25
     ALLOWED_ATTACHMENT_TYPES: list[str] = [

@@ -12,6 +12,7 @@ SERVICES = {
     "auth": settings.AUTH_SERVICE_URL,
     "profile": settings.PROFILE_SERVICE_URL,
     "intake": settings.VISIT_INTAKE_SERVICE_URL,
+    "records": settings.RECORD_SERVICE_URL,
 }
 
 # پیشوندی که هر سرویس واقعاً روت‌هایش را روش سوار کرده
@@ -19,6 +20,7 @@ ROUTE_PREFIX = {
     "auth": "/auth",      # رفتار فعلی حفظ می‌شود
     "profile": "/profile",    # profile-service: /profile/patient, /profile/doctor
     "intake": "",             # visit-intake-service: /visits, /doctor/visits
+    "records": "",
 }
 
 INTERNAL_ONLY = {"triage"}
@@ -56,7 +58,6 @@ async def proxy_request(service: str, path: str, request: Request):
 
     headers["x-gateway-request"] = "true"
 
-    # ⚠️ خط قبلی الصاق x-internal-api-key حذف شد (دلیلش بالا توضیح داده شد)
 
     body = await request.body()
 

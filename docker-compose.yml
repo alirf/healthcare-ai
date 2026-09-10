@@ -66,6 +66,29 @@ services:
       - healthcare-network
 
   # ═══════════════════════════════════════════════════
+  # Database (Medical Records)
+  # ═══════════════════════════════════════════════════
+  medical-records-db:
+    image: postgres:15-alpine
+    container_name: medical-records-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: medical_records_db
+    ports:
+      - "5435:5432"
+    volumes:
+      - medical-records-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d medical_records_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10    
+    networks:
+      - healthcare-network
+
+  # ═══════════════════════════════════════════════════
   # Cache
   # ═══════════════════════════════════════════════════
   redis:
@@ -216,10 +239,41 @@ services:
     networks:
       - healthcare-network
 
+  # ═══════════════════════════════════════════════════
+  # Medical Record Service
+  # ═══════════════════════════════════════════════════
+  medical-record-service:
+    build: ./services/medical-record-service
+    container_name: medical-record-service
+    restart: unless-stopped
+    depends_on:
+      medical-records-db:
+        condition: service_healthy
+    environment:
+      APP_NAME: Medical Record Service
+      DEBUG: "true"
+      DATABASE_URL: postgresql+asyncpg://postgres:password@medical-records-db:5432/medical_records_db
+      JWT_PUBLIC_KEY_PATH: /app/keys/public.pem
+      JWT_ALGORITHM: RS256
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_NAME: medical-records
+      MINIO_SECURE: "false"
+      INTERNAL_API_KEY: change-me-in-production-32-char-min
+      VISIT_INTAKE_SERVICE_URL: http://visit-intake-service:8004
+    ports:
+      - "8005:8005"
+    volumes:
+      - ./keys:/app/keys:ro
+    networks:
+      - healthcare-network
+
 volumes:
   pgdata:
   profile-db-data:
   visits-db-data:
+  medical-records-db-data:
   minio-data:
 
 networks:
