@@ -1,4 +1,4 @@
-# app/main.py (بدون تغییر)
+# app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -16,23 +16,25 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    redirect_slashes=False,
 )
 
-# CORS
+# ترتیب میدلورها مهم است: آخرین add_middleware = بیرونی‌ترین لایه (اول اجرا می‌شود)
+app.add_middleware(LoggingMiddleware)           # ۱. لاگ‌گیری
+app.add_middleware(JWTValidationMiddleware)     # ۲. اعتبارسنجی JWT
+app.add_middleware(RateLimiterMiddleware)       # ۳. محدودیت نرخ (بعد از JWT!)
+app.add_middleware(RoleCheckerMiddleware)       # ۴. بررسی نقش
+
+# CORS باید بیرونی‌ترین لایه باشد تا پیش‌درخواست‌های OPTIONS
+# قبل از بررسی JWT/نقش پاسخ بگیرند
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS.split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Process-Time", "X-RateLimit-Remaining", "Retry-After"]
+    expose_headers=["X-Process-Time", "X-RateLimit-Remaining", "Retry-After"],
 )
-
-# Middlewareها (ترتیب مهم است!)
-app.add_middleware(LoggingMiddleware)           # ۱. لاگ‌گیری
-app.add_middleware(RateLimiterMiddleware)       # ۲. محدودیت نرخ
-app.add_middleware(JWTValidationMiddleware)     # ۳. اعتبارسنجی JWT
-app.add_middleware(RoleCheckerMiddleware)       # ۴. بررسی نقش
 
 # Router
 app.include_router(proxy.router)

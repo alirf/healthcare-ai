@@ -1,10 +1,9 @@
 services:
   # ═══════════════════════════════════════════════════
-  # Database (Auth)
+  # Database (Auth)                         host: 5432
   # ═══════════════════════════════════════════════════
   postgres:
     image: postgres:16
-    container_name: healthcare-postgres
     environment:
       POSTGRES_DB: auth_db
       POSTGRES_USER: admin
@@ -22,11 +21,10 @@ services:
       - healthcare-network
 
   # ═══════════════════════════════════════════════════
-  # Database (Profile)
+  # Database (Profile)                      host: 5433
   # ═══════════════════════════════════════════════════
   profile-db:
     image: postgres:15-alpine
-    container_name: profile-db
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
@@ -44,11 +42,10 @@ services:
       - healthcare-network
 
   # ═══════════════════════════════════════════════════
-  # Database (Visit Intake)
+  # Database (Visit Intake)                 host: 5434
   # ═══════════════════════════════════════════════════
   visits-db:
     image: postgres:15-alpine
-    container_name: visits-db
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
@@ -66,11 +63,10 @@ services:
       - healthcare-network
 
   # ═══════════════════════════════════════════════════
-  # Database (Medical Records)
+  # Database (Medical Records)              host: 5435
   # ═══════════════════════════════════════════════════
   medical-records-db:
     image: postgres:15-alpine
-    container_name: medical-records-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
@@ -84,16 +80,15 @@ services:
       test: ["CMD-SHELL", "pg_isready -U postgres -d medical_records_db"]
       interval: 5s
       timeout: 3s
-      retries: 10    
+      retries: 10
     networks:
       - healthcare-network
 
   # ═══════════════════════════════════════════════════
-  # Cache
+  # Cache                                    host: 6379
   # ═══════════════════════════════════════════════════
   redis:
     image: redis:7-alpine
-    container_name: healthcare-redis
     ports:
       - "6379:6379"
     healthcheck:
@@ -105,11 +100,10 @@ services:
       - healthcare-network
 
   # ═══════════════════════════════════════════════════
-  # Object Storage (MinIO)
+  # Object Storage (MinIO)                   host: 9000/9001
   # ═══════════════════════════════════════════════════
   minio:
     image: minio/minio
-    container_name: minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -128,20 +122,20 @@ services:
       - healthcare-network
 
   # ═══════════════════════════════════════════════════
-  # Auth Service
+  # Auth Service                             host: 8001 -> container: 8000
   # ═══════════════════════════════════════════════════
   auth-service:
     build: ./services/auth-service
-    container_name: healthcare-auth
     environment:
       DATABASE_URL: postgresql://admin:changeme@postgres:5432/auth_db
       REDIS_URL: redis://redis:6379
-      PRIVATE_KEY_PATH: /app/keys/private.pem
-      PUBLIC_KEY_PATH: /app/keys/public.pem
+      JWT_PRIVATE_KEY_PATH: /app/keys/private.pem
+      JWT_PUBLIC_KEY_PATH: /app/keys/public.pem
+      PORT: 8000
     volumes:
       - ./keys:/app/keys:ro
     ports:
-      - "3001:3001"
+      - "8001:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -151,44 +145,12 @@ services:
       - healthcare-network
 
   # ═══════════════════════════════════════════════════
-  # API Gateway
-  # ═══════════════════════════════════════════════════
-  api-gateway:
-    build: ./services/api-gateway
-    container_name: healthcare-gateway
-    environment:
-      GATEWAY_PORT: 8080
-      GATEWAY_HOST: 0.0.0.0
-      REDIS_URL: redis://redis:6379
-      AUTH_SERVICE_URL: http://auth-service:3001
-      PROFILE_SERVICE_URL: http://profile-service:8002
-      VISIT_INTAKE_SERVICE_URL: http://visit-intake-service:8000
-      PUBLIC_KEY_PATH: /app/keys/public.pem
-      RATE_LIMIT_PUBLIC: 10
-      RATE_LIMIT_AUTH: 60
-      RATE_LIMIT_AI_TRIAGE: 5
-      RATE_LIMIT_PROFILE: 30
-      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173,http://localhost:8081
-    volumes:
-      - ./keys:/app/keys:ro
-    ports:
-      - "8080:8080"
-    depends_on:
-      auth-service:
-        condition: service_started
-      redis:
-        condition: service_healthy
-    networks:
-      - healthcare-network
-
-  # ═══════════════════════════════════════════════════
-  # User Profile Service
+  # User Profile Service                     host: 8002 -> container: 8000
   # ═══════════════════════════════════════════════════
   profile-service:
     build: ./services/user-profile-service
-    container_name: profile-service
     ports:
-      - "3002:8002"
+      - "8002:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:password@profile-db:5432/profile_db
       JWT_PUBLIC_KEY_PATH: /app/keys/public.pem
@@ -200,6 +162,7 @@ services:
       MINIO_SECURE: "false"
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-internal-secret-key-12345}
       MAX_AVATAR_SIZE_MB: 5
+      PORT: 8000
     volumes:
       - ./keys/public.pem:/app/keys/public.pem:ro
     depends_on:
@@ -211,11 +174,10 @@ services:
       - healthcare-network
 
   # ═══════════════════════════════════════════════════
-  # Visit Intake Service
+  # Visit Intake Service                     host: 8003 -> container: 8000
   # ═══════════════════════════════════════════════════
   visit-intake-service:
     build: ./services/visit-intake-service
-    container_name: visit-intake-service
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:password@visits-db:5432/visits_db
       JWT_PUBLIC_KEY_PATH: /app/keys/public.pem
@@ -226,9 +188,12 @@ services:
       MINIO_BUCKET_NAME: visit-files
       MINIO_SECURE: "false"
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-internal-secret-key-12345}
+      AI_TRIAGE_SERVICE_URL: http://ai-triage-service:8000
+      AI_NLP_ENABLED: "true"
       MAX_ATTACHMENT_SIZE_MB: 25
+      PORT: 8000
     ports:
-      - "8004:8000"
+      - "8003:8000"
     volumes:
       - ./keys/public.pem:/app/keys/public.pem:ro
     depends_on:
@@ -236,15 +201,18 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+      ai-nlp-service:
+        condition: service_started
+      ai-triage-service:
+        condition: service_started
     networks:
       - healthcare-network
 
   # ═══════════════════════════════════════════════════
-  # Medical Record Service
+  # Medical Record Service                   host: 8004 -> container: 8000
   # ═══════════════════════════════════════════════════
   medical-record-service:
     build: ./services/medical-record-service
-    container_name: medical-record-service
     restart: unless-stopped
     depends_on:
       medical-records-db:
@@ -260,12 +228,148 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: medical-records
       MINIO_SECURE: "false"
-      INTERNAL_API_KEY: change-me-in-production-32-char-min
-      VISIT_INTAKE_SERVICE_URL: http://visit-intake-service:8004
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-internal-secret-key-12345}
+      VISIT_INTAKE_SERVICE_URL: http://visit-intake-service:8000
+      PORT: 8000
     ports:
-      - "8005:8005"
+      - "8004:8000"
     volumes:
       - ./keys:/app/keys:ro
+    networks:
+      - healthcare-network
+
+  # ═══════════════════════════════════════════════════
+  # AI NLP Service (ParsBERT)                host: 8005 -> container: 8000
+  # ═══════════════════════════════════════════════════
+  ai-nlp-service:
+    build:
+      context: ./services/ai-nlp-service
+      args:
+        TORCH_VARIANT: cpu
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 600s      # ← ۱۰ دقیقه فرصت برای لود مدل
+      retries: 3
+    environment:
+      APP_NAME: AI NLP Service
+      DEBUG: "false"
+      MODEL_PATH: /app/models/best_model.pt
+      EVIDENCE_PATH: /app/models/evidence_list_clean.json
+      MODEL_NAME: HooshvareLab/bert-fa-base-uncased
+      MODEL_VERSION: parsbert-v1
+      THRESHOLD: "0.3"
+      MAX_LEN: "128"
+      DEVICE: ""
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-internal-secret-key-12345}
+      DEV_MODE: "false"
+      PORT: 8000
+    ports:
+      - "8005:8000"
+    networks:
+      - healthcare-network
+
+  # ═══════════════════════════════════════════════════
+  # AI Triage Service (orchestrator)         host: 8006 -> container: 8000
+  # ═══════════════════════════════════════════════════
+  # INTERNAL ONLY — not exposed through the API Gateway.
+  # Sits between caller services (visit-intake-service, ...) and AI model
+  # services (ai-nlp-service ParsBERT, future LLM / vision models).
+  ai-triage-service:
+    build: ./services/ai-triage-service
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    environment:
+      APP_NAME: AI Triage Service
+      DEBUG: "false"
+      # downstream AI model services (this service calls them)
+      AI_NLP_SERVICE_URL: http://ai-nlp-service:8000
+      AI_NLP_TIMEOUT_SECONDS: "30.0"
+      # upstream caller services (for the full-orchestration endpoint)
+      VISIT_INTAKE_SERVICE_URL: http://visit-intake-service:8000
+      VISIT_INTAKE_TIMEOUT_SECONDS: "15.0"
+      # shared internal API key
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-internal-secret-key-12345}
+      PORT: 8000
+    ports:
+      - "8006:8000"
+    depends_on:
+      ai-nlp-service:
+        condition: service_started
+    networks:
+      - healthcare-network
+
+  # ═══════════════════════════════════════════════════
+  # AI Diagnosis Service (disease prediction)   host: 8007 -> container: 8000
+  # ═══════════════════════════════════════════════════
+  # INTERNAL ONLY — not exposed through the API Gateway.
+  # Takes evidence_ids (from ParsBERT) → predicts diseases (LogisticRegression + rules)
+  ai-diagnosis-service:
+    build: ./services/ai-diagnosis-service
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    environment:
+      APP_NAME: AI Diagnosis Service
+      DEBUG: "false"
+      MODEL_PATH: /app/models/diagnosis_model.pkl
+      DISEASES_PATH: /app/models/diseases_fixed.json
+      SYMPTOMS_PATH: /app/models/symptoms_fixed.json
+      DEFAULT_TOP_K: "10"
+      MIN_PROBABILITY: "0.01"
+      ML_WEIGHT: "0.7"
+      RULE_WEIGHT: "0.3"
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-internal-secret-key-12345}
+      PORT: 8000
+    volumes:
+      # Mount the model artefacts (PKL + JSONs) as read-only
+      - ./data/healthcare-models:/app/models:ro
+    ports:
+      - "8007:8000"
+    networks:
+      - healthcare-network
+
+  # ═══════════════════════════════════════════════════
+  # API Gateway                              host: 8080
+  # ═══════════════════════════════════════════════════
+  api-gateway:
+    build: ./services/api-gateway
+    environment:
+      GATEWAY_PORT: 8080
+      GATEWAY_HOST: 0.0.0.0
+      REDIS_URL: redis://redis:6379
+      AUTH_SERVICE_URL: http://auth-service:8000
+      PROFILE_SERVICE_URL: http://profile-service:8000
+      VISIT_INTAKE_SERVICE_URL: http://visit-intake-service:8000
+      RECORD_SERVICE_URL: http://medical-record-service:8000
+      RATE_LIMIT_INTAKE: 30
+      RATE_LIMIT_RECORD: 30
+      PUBLIC_KEY_PATH: /app/keys/public.pem
+      RATE_LIMIT_PUBLIC: 10
+      RATE_LIMIT_AUTH: 60
+      RATE_LIMIT_AI_TRIAGE: 5
+      RATE_LIMIT_PROFILE: 30
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173,http://localhost:8081
+    volumes:
+      - ./keys:/app/keys:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      auth-service:
+        condition: service_started
+      redis:
+        condition: service_healthy
     networks:
       - healthcare-network
 

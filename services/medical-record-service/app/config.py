@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     ]
 
     # visit-intake-service (doctor endpoint looks up treated patients there)
-    VISIT_INTAKE_SERVICE_URL: str = "http://localhost:8004"
+    VISIT_INTAKE_SERVICE_URL: str = "http://localhost:8000"
 
     class Config:
         env_file = ".env"

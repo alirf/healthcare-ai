@@ -2,9 +2,9 @@
 📁 پوشه مبدا: D:\med\healthcare-ai\services\api-gateway
 📊 تعداد فایل‌های جمع‌آوری شده: 12
 ❌ تعداد خطاها: 0
-📁 پوشه‌های رد شده: public, .vscode, venv, node_modules, static, target, .output, .next, coverage, .venv, .env, dist, __pycache__, .idea, env, .nuxt, assets, build, .git, out
+📁 پوشه‌های رد شده: .env, out, node_modules, .venv, .nuxt, .output, coverage, .vscode, build, .idea, venv, public, .git, dist, __pycache__, .next, target, static, env, assets
 ======================================================================
-⚡ فقط پسوندهای: .py, .ts, .tsx, .java
+⚡ فقط پسوندهای: .ts, .tsx, .py, .java
 ======================================================================
 
 
@@ -17,7 +17,7 @@
 📄 app/config.py
 ──────────────────────────────────────────────────────────────────────
 # app/config.py
-from pathlib import Path              # ← اضافه کن
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -29,19 +29,29 @@ class Settings(BaseSettings):
     GATEWAY_PORT: int = 8080
     GATEWAY_HOST: str = "0.0.0.0"
     REDIS_URL: str = "redis://localhost:6379"
-    AUTH_SERVICE_URL: str = "http://localhost:3001"
-    PROFILE_SERVICE_URL: str = "http://localhost:3002"
+
+    AUTH_SERVICE_URL: str = "http://auth-service:8000"
+    PROFILE_SERVICE_URL: str = "http://profile-service:8000"
+    VISIT_INTAKE_SERVICE_URL: str = "http://visit-intake-service:8000"
+    RECORD_SERVICE_URL: str = "http://medical-record-service:8000"
+
     PUBLIC_KEY_PATH: str = str(BASE_DIR / "keys" / "public.pem")
+
     RATE_LIMIT_PUBLIC: int = 10
     RATE_LIMIT_AUTH: int = 60
     RATE_LIMIT_AI_TRIAGE: int = 5
     RATE_LIMIT_PROFILE: int = 30
+    RATE_LIMIT_INTAKE: int = 30
+    RATE_LIMIT_RECORD: int = 30
+
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:8081"
     INTERNAL_API_KEY: str = "change-me-in-production-32-char-min"
 
     class Config:
         env_file = ".env"
+        env_file_encoding = "utf-8"
         case_sensitive = True
+        extra = "ignore"
 
 
 @lru_cache()
@@ -54,7 +64,7 @@ settings = get_settings()
 ──────────────────────────────────────────────────────────────────────
 📄 app/main.py
 ──────────────────────────────────────────────────────────────────────
-# app/main.py (بدون تغییر)
+# app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -72,23 +82,25 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    redirect_slashes=False,
 )
 
-# CORS
+# ترتیب میدلورها مهم است: آخرین add_middleware = بیرونی‌ترین لایه (اول اجرا می‌شود)
+app.add_middleware(LoggingMiddleware)           # ۱. لاگ‌گیری
+app.add_middleware(JWTValidationMiddleware)     # ۲. اعتبارسنجی JWT
+app.add_middleware(RateLimiterMiddleware)       # ۳. محدودیت نرخ (بعد از JWT!)
+app.add_middleware(RoleCheckerMiddleware)       # ۴. بررسی نقش
+
+# CORS باید بیرونی‌ترین لایه باشد تا پیش‌درخواست‌های OPTIONS
+# قبل از بررسی JWT/نقش پاسخ بگیرند
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS.split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Process-Time", "X-RateLimit-Remaining", "Retry-After"]
+    expose_headers=["X-Process-Time", "X-RateLimit-Remaining", "Retry-After"],
 )
-
-# Middlewareها (ترتیب مهم است!)
-app.add_middleware(LoggingMiddleware)           # ۱. لاگ‌گیری
-app.add_middleware(RateLimiterMiddleware)       # ۲. محدودیت نرخ
-app.add_middleware(JWTValidationMiddleware)     # ۳. اعتبارسنجی JWT
-app.add_middleware(RoleCheckerMiddleware)       # ۴. بررسی نقش
 
 # Router
 app.include_router(proxy.router)
@@ -118,7 +130,7 @@ PUBLIC_ROUTES = {
     "/auth/refresh",
     "/auth/health",
     "/api/auth/login",
-    "/api/auth/register", 
+    "/api/auth/register",
     "/api/auth/verify-otp",
     "/api/auth/refresh",
     "/api/auth/health",
@@ -129,32 +141,43 @@ PUBLIC_ROUTES = {
 }
 
 
+def _is_public(path: str) -> bool:
+    # برابری دقیق یا زیرمسیر واقعی (با "/" بعدش)، نه فقط startswith خام
+    # تا مثلاً "/auth/login-something" به اشتباه عمومی تشخیص داده نشود.
+    if path in PUBLIC_ROUTES:
+        return True
+    return any(path.startswith(route + "/") for route in PUBLIC_ROUTES)
+
+
 class JWTValidationMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, **kwargs):
         super().__init__(app)
         self.public_key = Path(settings.PUBLIC_KEY_PATH).read_text()
-    
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        
-        if any(path.startswith(route) for route in PUBLIC_ROUTES):
+
+        if request.method == "OPTIONS":
             return await call_next(request)
-        
+
+        if _is_public(path):
+            return await call_next(request)
+
         auth_header = request.headers.get("authorization")
         if not auth_header:
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Token not sent.", "code": "MISSING_TOKEN"}
             )
-        
+
         if not auth_header.startswith("Bearer "):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "The token format is invalid.", "code": "INVALID_TOKEN_FORMAT"}
             )
-        
+
         token = auth_header.replace("Bearer ", "")
-        
+
         try:
             payload = jwt.decode(
                 token,
@@ -162,11 +185,11 @@ class JWTValidationMiddleware(BaseHTTPMiddleware):
                 algorithms=["RS256"],
                 options={"require": ["exp", "sub", "role"]}
             )
-            
+
             request.state.user_id = payload.get("sub")
             request.state.user_role = payload.get("role")
             request.state.token_payload = payload
-            
+
         except jwt.ExpiredSignatureError:
             return JSONResponse(
                 status_code=401,
@@ -177,8 +200,9 @@ class JWTValidationMiddleware(BaseHTTPMiddleware):
                 status_code=401,
                 content={"detail": f"Token is invalid: {str(e)}", "code": "INVALID_TOKEN"}
             )
-        
+
         return await call_next(request)
+
 
 ──────────────────────────────────────────────────────────────────────
 📄 app/middleware/logging_middleware.py
@@ -249,115 +273,102 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, **kwargs):
         super().__init__(app)
         self.redis = get_redis_client()
-        self.public_limit = settings.RATE_LIMIT_PUBLIC
-        self.auth_limit = settings.RATE_LIMIT_AUTH
-        self.ai_triage_limit = settings.RATE_LIMIT_AI_TRIAGE
-        self.profile_limit = settings.RATE_LIMIT_PROFILE
-    
+        self.limits = {
+            "public": settings.RATE_LIMIT_PUBLIC,
+            "auth": settings.RATE_LIMIT_AUTH,
+            "profile": settings.RATE_LIMIT_PROFILE,
+            "intake": settings.RATE_LIMIT_INTAKE,
+            "records": settings.RATE_LIMIT_RECORD,
+        }
+
     def _get_key(self, identifier: str, window: int) -> str:
         current_window = int(time.time()) // window
         return f"rate_limit:{identifier}:{current_window}"
-    
-    def _check_limit(self, key: str, limit: int, window: int = 60) -> tuple[bool, int, int]:
+
+    async def _check_limit(self, key: str, limit: int, window: int = 60) -> tuple[bool, int, int]:
         pipe = self.redis.pipeline()
         pipe.incr(key)
         pipe.expire(key, window)
-        results = pipe.execute()
-        
+        results = await pipe.execute()
+
         current_count = results[0]
         remaining = max(0, limit - current_count)
         reset_after = window - (int(time.time()) % window)
-        
+
         allowed = current_count <= limit
         return allowed, remaining, reset_after
-    
+
+    async def _enforce(self, request, call_next, identifier: str, limit: int, error_code: str, detail: str):
+        allowed, remaining, reset_after = await self._check_limit(self._get_key(identifier, 60), limit)
+        if not allowed:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": detail, "code": error_code, "retry_after": reset_after},
+                headers={"Retry-After": str(reset_after)},
+            )
+        response = await call_next(request)
+        response.headers["X-RateLimit-Remaining"] = str(remaining)
+        return response
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        
-        public_paths = ["/api/auth/login", "/api/auth/register", "/api/auth/verify-otp"]
+
+        # مسیرهای عمومی (لاگین/ثبت‌نام) — بر اساس IP، قبل از احراز هویت
+        public_paths = ("/api/auth/login", "/api/auth/register", "/api/auth/verify-otp")
         if any(path.startswith(p) for p in public_paths):
-            identifier = f"ip:{request.client.host}"
-            allowed, remaining, reset_after = self._check_limit(
-                self._get_key(identifier, 60), self.public_limit
+            client_ip = request.client.host if request.client else "unknown"
+            return await self._enforce(
+                request, call_next,
+                identifier=f"ip:{client_ip}",
+                limit=self.limits["public"],
+                error_code="RATE_LIMIT_EXCEEDED",
+                detail="Access from this IP address has been rate-limited",
             )
-            if not allowed:
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "detail": "Access from this IP address has been rate-limited",
-                        "code": "RATE_LIMIT_EXCEEDED",
-                        "retry_after": reset_after
-                    },
-                    headers={"Retry-After": str(reset_after)}
-                )
-            response = await call_next(request)
-            response.headers["X-RateLimit-Remaining"] = str(remaining)
-            return response
-        
-        profile_paths = ["/api/profile/"]
-        if any(path.startswith(p) for p in profile_paths):
-            user_id = getattr(request.state, "user_id", None)
-            if user_id:
-                identifier = f"user:{user_id}:profile"
-                allowed, remaining, reset_after = self._check_limit(
-                    self._get_key(identifier, 60), self.profile_limit
-                )
-                if not allowed:
-                    return JSONResponse(
-                        status_code=429,
-                        content={
-                            "detail": "Access from this IP address has been rate-limited",
-                            "code": "PROFILE_RATE_LIMIT_EXCEEDED",
-                            "retry_after": reset_after
-                        },
-                        headers={"Retry-After": str(reset_after)}
-                    )
-                response = await call_next(request)
-                response.headers["X-RateLimit-Remaining"] = str(remaining)
-                return response
-        
-        if path.startswith("/api/intake/") and "ai" in path:
-            user_id = getattr(request.state, "user_id", None)
-            if user_id:
-                identifier = f"user:{user_id}:ai"
-                allowed, remaining, reset_after = self._check_limit(
-                    self._get_key(identifier, 60), self.ai_triage_limit
-                )
-                if not allowed:
-                    return JSONResponse(
-                        status_code=429,
-                        content={
-                            "detail": "Access from this IP address has been rate-limited for AI Triage",
-                            "code": "AI_RATE_LIMIT_EXCEEDED",
-                            "retry_after": reset_after
-                        },
-                        headers={"Retry-After": str(reset_after)}
-                    )
-                response = await call_next(request)
-                response.headers["X-RateLimit-Remaining"] = str(remaining)
-                return response
-        
+
         user_id = getattr(request.state, "user_id", None)
-        if user_id:
-            identifier = f"user:{user_id}"
-            allowed, remaining, reset_after = self._check_limit(
-                self._get_key(identifier, 60), self.auth_limit
+
+        # مسیرهای محافظت‌شده‌ای که به این‌جا می‌رسند باید user_id داشته باشند
+        # (چون JWTValidationMiddleware قبل از این اجرا شده). اگر نداشت، یعنی مسیر
+        # عمومی دیگری بوده که نیاز به rate limit خاص کاربر ندارد.
+        if not user_id:
+            return await call_next(request)
+
+        if path.startswith("/api/profile/"):
+            return await self._enforce(
+                request, call_next,
+                identifier=f"user:{user_id}:profile",
+                limit=self.limits["profile"],
+                error_code="PROFILE_RATE_LIMIT_EXCEEDED",
+                detail="Profile service rate limit exceeded",
             )
-            if not allowed:
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "detail": "Access from this IP address has been rate-limited",
-                        "code": "RATE_LIMIT_EXCEEDED",
-                        "retry_after": reset_after
-                    },
-                    headers={"Retry-After": str(reset_after)}
-                )
-            response = await call_next(request)
-            response.headers["X-RateLimit-Remaining"] = str(remaining)
-            return response
-        
-        return await call_next(request)
+
+        if path.startswith("/api/intake/"):
+            return await self._enforce(
+                request, call_next,
+                identifier=f"user:{user_id}:intake",
+                limit=self.limits["intake"],
+                error_code="INTAKE_RATE_LIMIT_EXCEEDED",
+                detail="Visit intake rate limit exceeded",
+            )
+
+        if path.startswith("/api/records/"):
+            return await self._enforce(
+                request, call_next,
+                identifier=f"user:{user_id}:records",
+                limit=self.limits["records"],
+                error_code="RECORD_RATE_LIMIT_EXCEEDED",
+                detail="Medical record rate limit exceeded",
+            )
+
+        # محدودیت عمومی برای هر کاربر احراز هویت‌شده روی سایر مسیرها
+        return await self._enforce(
+            request, call_next,
+            identifier=f"user:{user_id}",
+            limit=self.limits["auth"],
+            error_code="RATE_LIMIT_EXCEEDED",
+            detail="Rate limit exceeded for this user",
+        )
+
 
 ──────────────────────────────────────────────────────────────────────
 📄 app/middleware/role_checker.py
@@ -418,7 +429,7 @@ class RoleCheckerMiddleware(BaseHTTPMiddleware):
 # app/router/proxy.py
 import httpx
 from fastapi import Request, APIRouter, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from app.config import settings
 
@@ -428,40 +439,61 @@ router = APIRouter()
 SERVICES = {
     "auth": settings.AUTH_SERVICE_URL,
     "profile": settings.PROFILE_SERVICE_URL,
+    "intake": settings.VISIT_INTAKE_SERVICE_URL,
+    "records": settings.RECORD_SERVICE_URL,
+}
+
+# پیشوندی که هر سرویس واقعاً روت‌هایش را روش سوار کرده
+ROUTE_PREFIX = {
+    "auth": "/auth",       # رفتار فعلی حفظ می‌شود
+    "profile": "/profile", # profile-service: /profile/patient, /profile/doctor
+    "intake": "",          # visit-intake-service: /visits, /doctor/visits
+    "records": "/records", # medical-record-service: /records
 }
 
 INTERNAL_ONLY = {"triage"}
 
+# این هدرها نباید عیناً از پاسخ upstream به کلاینت کپی بشن؛ Starlette/FastAPI
+# خودش باید content-length و content-encoding درست را برای بدنه‌ی جدید بسازد.
+HOP_BY_HOP_HEADERS = {
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+    "te", "trailers", "transfer-encoding", "upgrade",
+    "content-length", "content-encoding",
+}
+
 
 async def proxy_request(service: str, path: str, request: Request):
     """پروکسی درخواست به سرویس مقصد"""
-    
+
     if service in INTERNAL_ONLY:
         raise HTTPException(status_code=403, detail="Forbidden: Internal service only")
-    
+
     if service not in SERVICES:
         raise HTTPException(status_code=404, detail=f"Service '{service}' not found")
-    
-    target_url = f"{SERVICES[service]}/api/{service}/{path}"
-    
+
+    # 🔒 مسیرهای internal نباید هرگز از Gateway عبور کنند
+    if path.startswith("internal/"):
+        raise HTTPException(status_code=403, detail="Internal endpoints are not accessible through the gateway")
+
+    prefix = ROUTE_PREFIX.get(service, f"/api/{service}")
+    target_url = f"{SERVICES[service]}{prefix}/{path}" if path else f"{SERVICES[service]}{prefix}"
+
     headers = dict(request.headers)
     headers.pop("host", None)
-    
+
     user_id = getattr(request.state, "user_id", None)
     user_role = getattr(request.state, "user_role", None)
-    
+
     if user_id:
         headers["x-user-id"] = str(user_id)
     if user_role:
-        headers["x-user-role"] = str(user_role)
-    
+        # سرویس‌ها (profile, visit-intake) با lowercase کار می‌کنند
+        headers["x-user-role"] = str(user_role).lower()
+
     headers["x-gateway-request"] = "true"
-    
-    if path.startswith("internal/"):
-        headers["x-internal-api-key"] = settings.INTERNAL_API_KEY
-    
+
     body = await request.body()
-    
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             response = await client.request(
@@ -471,20 +503,36 @@ async def proxy_request(service: str, path: str, request: Request):
                 params=request.query_params,
                 content=body if body else None,
             )
-            
-            return JSONResponse(
-                content=response.json() if response.content else {},
-                status_code=response.status_code,
-                headers=dict(response.headers)
-            )
-            
         except httpx.ConnectError:
             raise HTTPException(status_code=503, detail=f"Service '{service}' unavailable")
         except httpx.TimeoutException:
             raise HTTPException(status_code=504, detail=f"Timeout connecting to '{service}'")
 
+    response_headers = {
+        k: v for k, v in response.headers.items()
+        if k.lower() not in HOP_BY_HOP_HEADERS
+    }
 
-# ✅ مسیر Auth عمومی (بدون /api)
+    content_type = response.headers.get("content-type", "")
+
+    # اگر پاسخ JSON است، به همان شکل قبلی برگردان.
+    # اگر نیست (مثلاً تصویر آواتار یا فایل ضمیمه ویزیت)، بایت‌های خام را عیناً پاس بده
+    # -- استفاده از response.json() روی محتوای غیر-JSON خطا می‌داد و درخواست را می‌شکست.
+    if "application/json" in content_type:
+        return JSONResponse(
+            content=response.json() if response.content else {},
+            status_code=response.status_code,
+            headers=response_headers,
+        )
+
+    return Response(
+        content=response.content,
+        status_code=response.status_code,
+        headers=response_headers,
+        media_type=content_type or None,
+    )
+
+
 @router.api_route(
     "/auth/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
@@ -493,7 +541,6 @@ async def auth_proxy(path: str, request: Request):
     return await proxy_request("auth", path, request)
 
 
-# ✅ مسیرهای API استاندارد
 @router.api_route(
     "/api/{service}/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
@@ -502,13 +549,21 @@ async def gateway_proxy(service: str, path: str, request: Request):
     return await proxy_request(service, path, request)
 
 
+@router.api_route(
+    "/api/{service}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+)
+async def gateway_proxy_root(service: str, request: Request):
+    return await proxy_request(service, "", request)
+
+
 @router.get("/health")
 async def health_check():
     return {
         "status": "healthy",
         "service": "api-gateway",
         "version": "1.0.0",
-        "services": list(SERVICES.keys())
+        "services": list(SERVICES.keys()),
     }
 
 ──────────────────────────────────────────────────────────────────────
@@ -519,7 +574,8 @@ async def health_check():
 ──────────────────────────────────────────────────────────────────────
 📄 app/utils/redis_client.py
 ──────────────────────────────────────────────────────────────────────
-import redis
+# app/utils/redis_client.py
+import redis.asyncio as redis
 from app.config import settings
 
 

@@ -1,0 +1,1332 @@
+======================================================================
+📁 پوشه مبدا: D:\med\healthcare-ai\services\ai-nlp-service
+📊 تعداد فایل‌های جمع‌آوری شده: 20
+❌ تعداد خطاها: 0
+📁 پوشه‌های رد شده: .next, .idea, node_modules, public, .vscode, out, venv, .env, env, dist, target, .nuxt, .venv, __pycache__, coverage, .git, .output, static, assets, build
+======================================================================
+⚡ فقط پسوندهای: .tsx, yaml, .dart, .java, .py, .jsx, .css, .ts, .js
+======================================================================
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/__init__.py
+──────────────────────────────────────────────────────────────────────
+"""AI NLP Service — stateless ParsBERT evidence-classifier inference API."""
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/config.py
+──────────────────────────────────────────────────────────────────────
+"""Application configuration using Pydantic Settings."""
+from functools import lru_cache
+from pathlib import Path
+
+from pydantic_settings import BaseSettings
+
+# Relative artefact paths are resolved against the service directory, never
+# against the process cwd (uvicorn may be started from anywhere).
+SERVICE_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _resolve_path(value: str) -> str:
+    path = Path(value)
+    return str(path if path.is_absolute() else (SERVICE_ROOT / path).resolve())
+
+
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables."""
+
+    # App
+    APP_NAME: str = "AI NLP Service"
+    DEBUG: bool = False
+    PORT: int = 8000
+
+    # Model artefacts
+    MODEL_PATH: str = "./models/best_model.pt"
+    EVIDENCE_PATH: str = "./models/evidence_list_clean.json"
+    MODEL_NAME: str = "HooshvareLab/bert-fa-base-uncased"
+    MODEL_VERSION: str = "parsbert-v1"
+
+    # Inference
+    THRESHOLD: float = 0.3
+    MAX_LEN: int = 128
+    DEVICE: str = ""  # empty = auto-detect (cuda if available, else cpu)
+
+    # Internal API Security (service-to-service calls only; no JWT here)
+    INTERNAL_API_KEY: str = "internal-secret-key-12345"
+    # DEV_MODE=true skips the internal API key check — local testing only!
+    DEV_MODE: bool = False
+
+    def model_post_init(self, __context) -> None:
+        self.MODEL_PATH = _resolve_path(self.MODEL_PATH)
+        self.EVIDENCE_PATH = _resolve_path(self.EVIDENCE_PATH)
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        extra = "ignore"
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    """Return cached settings instance."""
+    return Settings()
+
+
+settings = get_settings()
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/dependencies/__init__.py
+──────────────────────────────────────────────────────────────────────
+"""Authentication and security dependencies."""
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/dependencies/auth.py
+──────────────────────────────────────────────────────────────────────
+"""Internal API key dependency for service-to-service calls."""
+import hmac
+import logging
+from typing import Optional
+
+from fastapi import Request
+
+from app.config import settings
+from app.exceptions import InternalAPIKeyError
+
+logger = logging.getLogger(__name__)
+
+
+async def verify_internal_api_key(
+    request: Request,
+    x_internal_api_key: Optional[str] = None
+) -> bool:
+    """Verify service-to-service API key for internal endpoints.
+
+    Internal endpoints should NOT be exposed through the API Gateway.
+    They are only accessible directly between microservices.
+
+    When DEV_MODE=true the check is skipped entirely (local curl testing
+    only — never enable in production).
+    """
+    if settings.DEV_MODE:
+        return True
+
+    # Get from header if not passed directly
+    if x_internal_api_key is None:
+        x_internal_api_key = request.headers.get("X-Internal-API-Key")
+
+    provided = (x_internal_api_key or "").encode("utf-8")
+    expected = settings.INTERNAL_API_KEY.encode("utf-8")
+    if not provided or not hmac.compare_digest(provided, expected):
+        logger.warning(
+            "Rejected request to %s: missing or invalid internal API key",
+            request.url.path,
+        )
+        raise InternalAPIKeyError()
+
+    return True
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/exceptions.py
+──────────────────────────────────────────────────────────────────────
+"""Custom exceptions for the AI NLP service."""
+from fastapi import HTTPException, status
+
+
+class InternalAPIKeyError(HTTPException):
+    def __init__(self):
+        super().__init__(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid internal API key")
+
+
+class ModelNotLoadedError(HTTPException):
+    def __init__(self, detail: str = "Model is not loaded"):
+        super().__init__(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/main.py
+──────────────────────────────────────────────────────────────────────
+"""FastAPI application factory for AI NLP Service."""
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
+
+from app.config import settings
+from app.routers.extract import router as extract_router
+from app.routers.health import router as health_router
+from app.services import nlp_service as nlp_service_module
+
+logging.basicConfig(
+    level=logging.DEBUG if settings.DEBUG else logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("%s starting up (dev_mode=%s)...", settings.APP_NAME, settings.DEV_MODE)
+    # Loading torch weights is blocking work — keep it off the event loop.
+    await run_in_threadpool(nlp_service_module.nlp_service.load)
+    if nlp_service_module.nlp_service.loaded:
+        logger.info("Model loaded on %s — service ready", nlp_service_module.nlp_service.device)
+    else:
+        logger.error(
+            "Service started in degraded mode: model failed to load (%s) — /health returns 503",
+            nlp_service_module.nlp_service.load_error,
+        )
+    yield
+    logger.info("%s shutting down...", settings.APP_NAME)
+    nlp_service_module.nlp_service.unload()
+
+
+def create_application() -> FastAPI:
+    app = FastAPI(
+        title=settings.APP_NAME,
+        description="""
+        Healthcare AI - AI NLP Service
+
+        Stateless inference microservice:
+        - Persian free text in
+        - Detected evidence codes with confidence scores out
+
+        Internal-only. No database, no JWT, no orchestration — the
+        visit-intake-service calls /extract, then triage, then persists
+        the results in its own database.
+        """,
+        version="1.0.0",
+        lifespan=lifespan,
+        docs_url="/docs",
+        redoc_url="/redoc",
+        redirect_slashes=False,
+    )
+
+    app.include_router(health_router)
+    app.include_router(extract_router)
+
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception):
+        logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+    @app.get("/", tags=["Root"])
+    async def root():
+        return {
+            "service": settings.APP_NAME,
+            "version": "1.0.0",
+            "model_loaded": nlp_service_module.nlp_service.loaded,
+        }
+
+    return app
+
+
+app = create_application()
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/routers/__init__.py
+──────────────────────────────────────────────────────────────────────
+"""HTTP routers."""
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/routers/extract.py
+──────────────────────────────────────────────────────────────────────
+"""Inference endpoints: POST /extract and GET /model-info."""
+import logging
+
+from fastapi import APIRouter, Depends
+
+from app.config import settings
+from app.dependencies.auth import verify_internal_api_key
+from app.exceptions import ModelNotLoadedError
+from app.schemas.nlp import ExtractRequest, ExtractResponse, ModelInfo
+from app.services import nlp_service as nlp_service_module
+from app.services.nlp_service import NLPService
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["Evidence Extraction"])
+
+MAX_TEXT_LENGTH = 5000
+
+
+def _get_service() -> NLPService:
+    # Resolve the singleton at request time so tests can monkeypatch
+    # app.services.nlp_service.nlp_service with a fake.
+    return nlp_service_module.nlp_service
+
+
+def _ensure_loaded(service: NLPService) -> None:
+    if not service.loaded:
+        detail = "Model is not loaded"
+        if service.load_error:
+            detail = f"Model is not loaded: {service.load_error}"
+        logger.error("Request rejected — %s", detail)
+        raise ModelNotLoadedError(detail)
+
+
+@router.post("/extract", response_model=ExtractResponse)
+async def extract(
+    payload: ExtractRequest,
+    _api_key: bool = Depends(verify_internal_api_key),
+) -> ExtractResponse:
+    """Persian free text -> detected evidence codes with confidence scores."""
+    service = _get_service()
+    _ensure_loaded(service)
+
+    text = payload.text or ""
+    truncated = len(text) > MAX_TEXT_LENGTH
+    if truncated:
+        text = text[:MAX_TEXT_LENGTH]
+
+    threshold = payload.threshold if payload.threshold is not None else settings.THRESHOLD
+
+    if not text.strip():
+        # Empty / whitespace-only input is a valid request with no evidence
+        # (deliberately 200, not 400). No inference is run.
+        logger.info("Empty or whitespace-only text received — returning empty result")
+        return ExtractResponse(
+            text=text,
+            detected=[],
+            threshold=threshold,
+            apply_hierarchy_filter=payload.apply_hierarchy_filter,
+            truncated=truncated,
+            model_version=settings.MODEL_VERSION,
+            inference_time_ms=0.0,
+        )
+
+    detected, elapsed_ms = await service.extract(
+        text=text,
+        threshold=threshold,
+        top_k=payload.top_k,
+        apply_hierarchy_filter=payload.apply_hierarchy_filter,
+    )
+    logger.info(
+        "/extract: %d evidence(s) in %.1f ms (threshold=%s, top_k=%s, "
+        "hierarchy_filter=%s, truncated=%s, chars=%d)",
+        len(detected),
+        elapsed_ms,
+        threshold,
+        payload.top_k,
+        payload.apply_hierarchy_filter,
+        truncated,
+        len(text),
+    )
+
+    return ExtractResponse(
+        text=text,
+        detected=detected,
+        threshold=threshold,
+        apply_hierarchy_filter=payload.apply_hierarchy_filter,
+        truncated=truncated,
+        model_version=settings.MODEL_VERSION,
+        inference_time_ms=round(elapsed_ms, 1),
+    )
+
+
+@router.get(
+    "/model-info",
+    response_model=ModelInfo,
+    dependencies=[Depends(verify_internal_api_key)],
+)
+async def model_info() -> ModelInfo:
+    """Checkpoint / evidence metadata for operators and callers."""
+    service = _get_service()
+    _ensure_loaded(service)
+
+    return ModelInfo(
+        model_name=settings.MODEL_NAME,
+        checkpoint_path=settings.MODEL_PATH,
+        evidence_path=settings.EVIDENCE_PATH,
+        model_version=settings.MODEL_VERSION,
+        evidence_count=service.evidence_count,
+        threshold_default=settings.THRESHOLD,
+        max_len=settings.MAX_LEN,
+        device=service.device,
+        training_f1=service.training_metadata.get("f1"),
+        training_epoch=service.training_metadata.get("epoch"),
+        loaded_at=service.loaded_at,
+    )
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/routers/health.py
+──────────────────────────────────────────────────────────────────────
+"""Public health endpoint."""
+import logging
+
+from fastapi import APIRouter, Response
+
+from app.schemas.nlp import HealthResponse
+from app.services import nlp_service as nlp_service_module
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["Health"])
+
+
+@router.get(
+    "/health",
+    response_model=HealthResponse,
+    response_model_exclude_none=True,
+    responses={503: {"model": HealthResponse}},
+)
+async def health(response: Response) -> HealthResponse:
+    """200 when the model is loaded, 503 otherwise. No auth required."""
+    service = nlp_service_module.nlp_service
+    if service.loaded:
+        return HealthResponse(
+            status="healthy",
+            model_loaded=True,
+            device=service.device,
+            evidence_count=service.evidence_count,
+        )
+
+    logger.warning("Health check failed: model not loaded (%s)", service.load_error)
+    response.status_code = 503
+    return HealthResponse(
+        status="unhealthy",
+        model_loaded=False,
+        error=service.load_error or "Model is not loaded",
+    )
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/schemas/__init__.py
+──────────────────────────────────────────────────────────────────────
+"""Pydantic schemas for the AI NLP service API."""
+from app.schemas.nlp import (
+    DetectedEvidence,
+    ExtractRequest,
+    ExtractResponse,
+    HealthResponse,
+    ModelInfo,
+)
+
+__all__ = [
+    "DetectedEvidence",
+    "ExtractRequest",
+    "ExtractResponse",
+    "HealthResponse",
+    "ModelInfo",
+]
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/schemas/nlp.py
+──────────────────────────────────────────────────────────────────────
+"""Request/response contracts for the NLP inference API."""
+from typing import Any, Dict, List, Optional
+
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+
+
+class ExtractRequest(BaseModel):
+    """POST /extract request body."""
+
+    text: str = Field(
+        ...,
+        description="Persian free text. Inputs longer than 5000 chars are truncated.",
+    )
+    threshold: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        le=1.0,
+        description="Detection threshold; defaults to settings.THRESHOLD when omitted.",
+    )
+    top_k: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Return only the K most confident evidences (after filtering).",
+    )
+    apply_hierarchy_filter: bool = Field(
+        default=True,
+        description="Drop child evidences whose parent evidence was not detected.",
+    )
+
+
+class DetectedEvidence(BaseModel):
+    """One detected evidence with its probability and pass-through metadata.
+
+    `value_meaning`, `possible-values` and `default_value` are passed through
+    untouched for the follow-up questioning step — this service never
+    interprets them.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    evidence_id: str
+    name: str
+    name_fa: Optional[str] = None
+    question_en: Optional[str] = None
+    question_fa: Optional[str] = None
+    data_type: Optional[str] = None
+    is_antecedent: Optional[bool] = None
+    code_question: Optional[str] = None
+    default_value: Optional[Any] = None
+    value_meaning: Optional[Dict[str, Any]] = None
+    # The source JSON key is "possible-values" (hyphenated); keep the original
+    # key in responses for faithful pass-through.
+    possible_values: Optional[List[Any]] = Field(
+        default=None,
+        validation_alias=AliasChoices("possible-values", "possible_values"),
+        serialization_alias="possible-values",
+    )
+    confidence: float
+
+
+class ExtractResponse(BaseModel):
+    """POST /extract response body."""
+
+    text: str
+    detected: List[DetectedEvidence]
+    threshold: float
+    apply_hierarchy_filter: bool
+    truncated: bool
+    model_version: str
+    inference_time_ms: float
+
+
+class ModelInfo(BaseModel):
+    """GET /model-info response body."""
+
+    model_name: str
+    checkpoint_path: str
+    evidence_path: str
+    model_version: str
+    evidence_count: int
+    threshold_default: float
+    max_len: int
+    device: str
+    training_f1: Optional[float] = None
+    training_epoch: Optional[int] = None
+    loaded_at: Optional[str] = None
+
+
+class HealthResponse(BaseModel):
+    """GET /health response body."""
+
+    status: str
+    model_loaded: bool
+    device: Optional[str] = None
+    evidence_count: Optional[int] = None
+    error: Optional[str] = None
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/services/__init__.py
+──────────────────────────────────────────────────────────────────────
+"""Business-logic services: model artefacts and inference."""
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/services/classifier.py
+──────────────────────────────────────────────────────────────────────
+import torch.nn as nn
+from transformers import BertModel
+
+MODEL_NAME = "HooshvareLab/bert-fa-base-uncased"
+
+
+class EvidenceClassifier(nn.Module):
+    def __init__(self, n_classes, model_name=MODEL_NAME, dropout=0.3):
+        super().__init__()
+        self.bert = BertModel.from_pretrained(model_name)
+        self.dropout = nn.Dropout(dropout)
+        self.classifier = nn.Linear(self.bert.config.hidden_size, n_classes)
+
+    def forward(self, input_ids, attention_mask):
+        outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+        pooled = self.dropout(outputs.pooler_output)
+        return self.classifier(pooled)
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/services/evidence_loader.py
+──────────────────────────────────────────────────────────────────────
+"""Loader for evidence_list_clean.json.
+
+The file is a JSON *object* keyed by evidence_id, e.g.:
+
+    {
+      "E_19_0001": {"name": "skin_lesions", "code_question": "E_19_0001", ...},
+      "E_19_0002": {"name": "lesion_color", "code_question": "E_19_0001", ...},
+      ...
+    }
+
+The classifier's output index maps to the lexically sorted evidence ids —
+the model was trained with that ordering, so it must never change.
+"""
+import json
+import logging
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+logger = logging.getLogger(__name__)
+
+
+def load_evidences(path: str) -> Tuple[List[str], Dict[str, dict]]:
+    """Load the evidence dictionary.
+
+    Returns:
+        eid_list: lexically sorted evidence ids (stable model class order).
+        eid_info: raw evidence definitions keyed by evidence_id, passed
+                  through untouched (value_meaning / possible-values /
+                  default_value are metadata for the questioning step).
+    Raises:
+        FileNotFoundError: when the file does not exist.
+        ValueError: when the file is corrupt or not a non-empty JSON object.
+    """
+    evidence_path = Path(path)
+    if not evidence_path.is_file():
+        raise FileNotFoundError(f"Evidence file not found: {evidence_path}")
+
+    with evidence_path.open("r", encoding="utf-8") as f:
+        raw = json.load(f)
+
+    if not isinstance(raw, dict) or not raw:
+        raise ValueError(f"Evidence file must be a non-empty JSON object: {evidence_path}")
+
+    eid_info: Dict[str, dict] = {str(key): value for key, value in raw.items()}
+    eid_list: List[str] = sorted(eid_info.keys())  # stable class-index order
+
+    logger.info("Loaded %d evidence definitions from %s", len(eid_list), evidence_path)
+    return eid_list, eid_info
+
+
+──────────────────────────────────────────────────────────────────────
+📄 app/services/nlp_service.py
+──────────────────────────────────────────────────────────────────────
+"""Stateless inference wrapper around the ParsBERT evidence classifier.
+
+The model is loaded exactly once (lifespan startup) and shared by every
+request. Torch inference never runs on the event loop — it is dispatched
+to Starlette's thread pool via run_in_threadpool. There is deliberately
+no ProcessPoolExecutor: the model is an in-process singleton.
+"""
+import logging
+import time
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import torch
+from starlette.concurrency import run_in_threadpool
+from transformers import BertTokenizer
+
+from app.config import settings
+from app.exceptions import ModelNotLoadedError
+from app.schemas.nlp import DetectedEvidence
+from app.services.classifier import EvidenceClassifier
+from app.services.evidence_loader import load_evidences
+
+logger = logging.getLogger(__name__)
+
+
+def postprocess_probabilities(
+    probs: np.ndarray,
+    eid_list: List[str],
+    eid_info: Dict[str, dict],
+    threshold: float,
+    top_k: Optional[int],
+    apply_hierarchy_filter: bool,
+) -> List[DetectedEvidence]:
+    """Shared multi-label post-processing (also reused by the test fake).
+
+    1. keep evidences with probability strictly greater than `threshold`,
+    2. sort by confidence descending,
+    3. optional hierarchy filter: a child evidence (code_question pointing at
+       another evidence) is only kept when its parent is also detected —
+       root evidences (code_question == own id) are always kept,
+    4. optional top-k cut, applied after the filter.
+    """
+    if len(probs) != len(eid_list):
+        raise ValueError(
+            f"Probability vector length {len(probs)} != evidence count {len(eid_list)}"
+        )
+
+    scored: List[Tuple[str, float]] = [
+        (eid, float(probs[idx])) for idx, eid in enumerate(eid_list)
+    ]
+    detected = [(eid, prob) for eid, prob in scored if prob > threshold]
+    detected.sort(key=lambda item: item[1], reverse=True)
+
+    detected_ids = {eid for eid, _ in detected}
+
+    results: List[DetectedEvidence] = []
+    dropped: List[str] = []
+    for eid, prob in detected:
+        info = eid_info.get(eid, {})
+        parent = info.get("code_question") or eid  # missing -> treat as root
+        if apply_hierarchy_filter and parent != eid and parent not in detected_ids:
+            dropped.append(eid)
+            continue
+        results.append(_build_detected_evidence(eid, prob, info))
+
+    if dropped:
+        logger.warning(
+            "Hierarchy filter dropped %d child evidence(s) with no detected parent: %s",
+            len(dropped),
+            ", ".join(dropped),
+        )
+
+    if top_k is not None:
+        results = results[:top_k]
+
+    return results
+
+
+def _build_detected_evidence(eid: str, prob: float, info: Dict[str, Any]) -> DetectedEvidence:
+    """Map a raw evidence definition to the response schema (pass-through)."""
+    return DetectedEvidence(
+        evidence_id=eid,
+        name=info.get("name", eid),
+        name_fa=info.get("name_fa"),
+        question_en=info.get("question_en"),
+        question_fa=info.get("question_fa"),
+        data_type=info.get("data_type"),
+        is_antecedent=info.get("is_antecedent"),
+        code_question=info.get("code_question"),
+        default_value=info.get("default_value"),
+        value_meaning=info.get("value_meaning"),
+        possible_values=info.get("possible-values"),
+        confidence=round(prob, 4),
+    )
+
+
+class NLPService:
+    """Singleton wrapper around the trained EvidenceClassifier."""
+
+    def __init__(self) -> None:
+        self.model: Optional[EvidenceClassifier] = None
+        self.tokenizer: Optional[BertTokenizer] = None
+        self.eid_list: List[str] = []
+        self.eid_info: Dict[str, dict] = {}
+        self.device: str = "cpu"
+        self.loaded_at: Optional[str] = None
+        self.loaded: bool = False
+        self.load_error: Optional[str] = None
+        self.training_metadata: Dict[str, Any] = {}
+
+    @property
+    def evidence_count(self) -> int:
+        return len(self.eid_list)
+
+    def load(self) -> None:
+        """Load evidences, tokenizer and checkpoint. Never raises.
+
+        Any failure leaves the service alive in a degraded state:
+        /health reports 503 and /extract + /model-info raise
+        ModelNotLoadedError (503).
+        """
+        started = time.perf_counter()
+        try:
+            # Env override DEVICE takes priority; otherwise auto-detect.
+            if settings.DEVICE:
+                device = settings.DEVICE
+            else:
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.device = str(device)
+            logger.info("Using device: %s", self.device)
+
+            self.eid_list, self.eid_info = load_evidences(settings.EVIDENCE_PATH)
+
+            logger.info("Loading tokenizer: %s", settings.MODEL_NAME)
+            self.tokenizer = BertTokenizer.from_pretrained(settings.MODEL_NAME)
+
+            logger.info("Loading checkpoint: %s", settings.MODEL_PATH)
+            checkpoint = torch.load(
+                settings.MODEL_PATH,
+                map_location=self.device,
+                weights_only=False,  # required for PyTorch 2.6+
+            )
+            if not isinstance(checkpoint, dict) or "model_state_dict" not in checkpoint:
+                raise ValueError("Checkpoint must be a dict containing 'model_state_dict'")
+
+            state_dict = checkpoint["model_state_dict"]
+            n_classes = int(state_dict["classifier.weight"].shape[0])
+            if n_classes != len(self.eid_list):
+                # The most common deployment bug: checkpoint trained against a
+                # different evidence list. Stay alive, report unhealthy.
+                logger.error(
+                    "Class-count mismatch: checkpoint has %d output classes but "
+                    "evidence list has %d entries — refusing to load",
+                    n_classes,
+                    len(self.eid_list),
+                )
+                raise ValueError(
+                    f"Checkpoint class count ({n_classes}) != evidence count ({len(self.eid_list)})"
+                )
+
+            model = EvidenceClassifier(n_classes=n_classes, model_name=settings.MODEL_NAME)
+            model.load_state_dict(state_dict)
+            model.to(self.device)
+            model.eval()  # inference only — disable dropout for determinism
+            self.model = model
+
+            self.training_metadata = {
+                "f1": self._as_float(checkpoint.get("f1"), "f1"),
+                "epoch": self._as_int(checkpoint.get("epoch"), "epoch"),
+            }
+
+            self.loaded_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            self.loaded = True
+            self.load_error = None
+            logger.info(
+                "Model '%s' loaded on %s in %.1f ms (%d evidences, training_f1=%s, training_epoch=%s)",
+                settings.MODEL_VERSION,
+                self.device,
+                (time.perf_counter() - started) * 1000,
+                len(self.eid_list),
+                self.training_metadata["f1"],
+                self.training_metadata["epoch"],
+            )
+        except Exception as exc:
+            self.loaded = False
+            self.load_error = str(exc) or exc.__class__.__name__
+            self.model = None
+            self.tokenizer = None
+            logger.error("Model failed to load: %s", self.load_error, exc_info=True)
+
+    def unload(self) -> None:
+        """Release model resources on shutdown."""
+        self.loaded = False
+        self.model = None
+        self.tokenizer = None
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.info("Model resources released")
+
+    async def extract(
+        self,
+        text: str,
+        threshold: float,
+        top_k: Optional[int] = None,
+        apply_hierarchy_filter: bool = True,
+    ) -> Tuple[List[DetectedEvidence], float]:
+        """Run inference in the thread pool; returns (detected, elapsed_ms)."""
+        return await run_in_threadpool(
+            self._infer_sync, text, threshold, top_k, apply_hierarchy_filter
+        )
+
+    def _infer_sync(
+        self,
+        text: str,
+        threshold: float,
+        top_k: Optional[int],
+        apply_hierarchy_filter: bool,
+    ) -> Tuple[List[DetectedEvidence], float]:
+        if not self.loaded or self.model is None or self.tokenizer is None:
+            raise ModelNotLoadedError()
+
+        started = time.perf_counter()
+
+        encoding = self.tokenizer(
+            text,
+            add_special_tokens=True,
+            max_length=settings.MAX_LEN,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
+        )
+        with torch.no_grad():
+            outputs = self.model(
+                encoding["input_ids"].to(self.device),
+                encoding["attention_mask"].to(self.device),
+            )
+            probs = torch.sigmoid(outputs).cpu().numpy()[0]  # multi-label
+
+        detected = postprocess_probabilities(
+            probs=probs,
+            eid_list=self.eid_list,
+            eid_info=self.eid_info,
+            threshold=threshold,
+            top_k=top_k,
+            apply_hierarchy_filter=apply_hierarchy_filter,
+        )
+
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        logger.info(
+            "Inference finished in %.1f ms: %d evidence(s) above threshold %.2f",
+            elapsed_ms,
+            len(detected),
+            threshold,
+        )
+        return detected, elapsed_ms
+
+    @staticmethod
+    def _as_float(value: Any, label: str) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            logger.warning("Could not coerce checkpoint %s=%r to float", label, value)
+            return None
+
+    @staticmethod
+    def _as_int(value: Any, label: str) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            logger.warning("Could not coerce checkpoint %s=%r to int", label, value)
+            return None
+
+
+# Module-level singleton — import this, never instantiate elsewhere.
+nlp_service = NLPService()
+
+
+──────────────────────────────────────────────────────────────────────
+📄 tests/__init__.py
+──────────────────────────────────────────────────────────────────────
+"""Tests for ai-nlp-service. The real NLPService is replaced by a fake."""
+
+
+──────────────────────────────────────────────────────────────────────
+📄 tests/conftest.py
+──────────────────────────────────────────────────────────────────────
+"""Shared fixtures for ai-nlp-service tests.
+
+The real NLPService is replaced by FakeNLPService so tests never touch
+torch, the checkpoint or the HuggingFace hub. The fake reuses the real
+post-processing logic (threshold -> sort -> hierarchy filter -> top_k)
+via postprocess_probabilities(), only the torch part is faked.
+"""
+import sys
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from app.main import app  # noqa: E402
+from app.schemas.nlp import DetectedEvidence  # noqa: E402
+from app.services import nlp_service as nlp_service_module  # noqa: E402
+from app.services.nlp_service import postprocess_probabilities  # noqa: E402
+
+TEST_INTERNAL_API_KEY = "internal-secret-key-12345"
+
+AUTH_HEADERS = {"X-Internal-API-Key": TEST_INTERNAL_API_KEY}
+
+# Fake evidence_list (same shape as evidence_list_clean.json: dict keyed by
+# evidence_id). E_19_0001 is a root evidence (code_question == own id) and
+# parent of E_19_0002; E_19_0003 is another root.
+FAKE_EVIDENCE_LIST: Dict[str, Dict[str, Any]] = {
+    "E_19_0001": {
+        "name": "skin_lesions",
+        "code_question": "E_19_0001",
+        "question_en": "Do you have any lesions, redness or problems on your skin?",
+        "is_antecedent": False,
+        "default_value": 0,
+        "value_meaning": {},
+        "possible-values": [],
+        "data_type": "B",
+        "name_fa": "ضایعات پوستی",
+        "question_fa": "آیا ضایعه، قرمزی یا مشکل پوستی مرتبط با علت مراجعه دارید؟",
+    },
+    "E_19_0002": {
+        "name": "lesion_color",
+        "code_question": "E_19_0001",
+        "question_en": "What color is the rash?",
+        "is_antecedent": False,
+        "default_value": "V_11",
+        "value_meaning": {
+            "V_11": {"fa": "نامشخص", "en": "NA"},
+            "V_157": {"fa": "قرمز", "en": "red"},
+        },
+        "possible-values": ["V_11", "V_157"],
+        "data_type": "C",
+        "name_fa": "رنگ ضایعه",
+        "question_fa": "راش/ضایعه چه رنگی است؟",
+    },
+    "E_19_0003": {
+        "name": "fever",
+        "code_question": "E_19_0003",
+        "question_en": "Do you have fever?",
+        "is_antecedent": False,
+        "default_value": 0,
+        "value_meaning": {},
+        "possible-values": [],
+        "data_type": "B",
+        "name_fa": "تب",
+        "question_fa": "آیا تب دارید؟",
+    },
+}
+
+
+class FakeNLPService:
+    """Test double mirroring NLPService's public interface, without torch."""
+
+    def __init__(
+        self,
+        predictions: Optional[List[Tuple[str, float]]] = None,
+        loaded: bool = True,
+    ) -> None:
+        self.loaded = loaded
+        self.load_error = None if loaded else "checkpoint not found (fake)"
+        self.device = "cpu"
+        self.eid_list: List[str] = sorted(FAKE_EVIDENCE_LIST.keys())
+        self.eid_info: Dict[str, Dict[str, Any]] = FAKE_EVIDENCE_LIST
+        self.loaded_at = "2026-01-15T10:30:00Z"
+        self.training_metadata: Dict[str, Any] = {"f1": 0.84, "epoch": 3}
+        # Default predictions from the spec's happy-path fixture.
+        self.predictions = predictions if predictions is not None else [
+            ("E_19_0001", 0.87),
+            ("E_19_0002", 0.51),
+        ]
+
+    @property
+    def evidence_count(self) -> int:
+        return len(self.eid_list)
+
+    async def extract(
+        self,
+        text: str,
+        threshold: float,
+        top_k: Optional[int] = None,
+        apply_hierarchy_filter: bool = True,
+    ) -> Tuple[List[DetectedEvidence], float]:
+        probs = np.zeros(len(self.eid_list), dtype=float)
+        for eid, prob in self.predictions:
+            probs[self.eid_list.index(eid)] = prob
+
+        detected = postprocess_probabilities(
+            probs=probs,
+            eid_list=self.eid_list,
+            eid_info=self.eid_info,
+            threshold=threshold,
+            top_k=top_k,
+            apply_hierarchy_filter=apply_hierarchy_filter,
+        )
+        return detected, 12.3
+
+
+@pytest.fixture
+def fake_nlp_service() -> FakeNLPService:
+    return FakeNLPService()
+
+
+@pytest_asyncio.fixture
+async def client(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_nlp_service: FakeNLPService,
+) -> AsyncClient:
+    """HTTPX async client bound to the ASGI app with the fake service injected.
+
+    Tests that need custom predictions re-patch
+    app.services.nlp_service.nlp_service with their own FakeNLPService.
+    """
+    monkeypatch.setattr(nlp_service_module, "nlp_service", fake_nlp_service)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as async_client:
+        yield async_client
+
+
+──────────────────────────────────────────────────────────────────────
+📄 tests/test_auth.py
+──────────────────────────────────────────────────────────────────────
+"""Tests for the internal API key check (X-Internal-API-Key / DEV_MODE)."""
+import pytest
+
+from app.config import settings
+from app.services import nlp_service as nlp_service_module
+from tests.conftest import AUTH_HEADERS, FakeNLPService
+
+
+@pytest.mark.asyncio
+async def test_extract_without_api_key_returns_403(client):
+    resp = await client.post("/extract", json={"text": "سلام"})
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Invalid internal API key"
+
+
+@pytest.mark.asyncio
+async def test_extract_with_wrong_api_key_returns_403(client):
+    resp = await client.post(
+        "/extract",
+        headers={"X-Internal-API-Key": "wrong-key"},
+        json={"text": "سلام"},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_extract_with_valid_api_key_returns_200(client):
+    resp = await client.post(
+        "/extract", headers=AUTH_HEADERS, json={"text": "سلام پوستم قرمز شده"}
+    )
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_extract_dev_mode_skips_api_key(client, monkeypatch):
+    monkeypatch.setattr(settings, "DEV_MODE", True)
+    resp = await client.post("/extract", json={"text": "سلام پوستم قرمز شده"})
+    assert resp.status_code == 200
+    assert resp.json()["detected"]
+
+
+@pytest.mark.asyncio
+async def test_extract_returns_503_when_model_not_loaded(client, monkeypatch):
+    monkeypatch.setattr(
+        nlp_service_module, "nlp_service", FakeNLPService(loaded=False)
+    )
+    resp = await client.post(
+        "/extract", headers=AUTH_HEADERS, json={"text": "سلام"}
+    )
+    assert resp.status_code == 503
+    assert "Model is not loaded" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_model_info_without_api_key_returns_403(client):
+    resp = await client.get("/model-info")
+    assert resp.status_code == 403
+
+
+──────────────────────────────────────────────────────────────────────
+📄 tests/test_extract.py
+──────────────────────────────────────────────────────────────────────
+"""Tests for POST /extract."""
+import pytest
+
+from app.config import settings
+from app.services import nlp_service as nlp_service_module
+from tests.conftest import AUTH_HEADERS, FakeNLPService
+
+
+@pytest.mark.asyncio
+async def test_extract_happy_path(client):
+    resp = await client.post(
+        "/extract",
+        headers=AUTH_HEADERS,
+        json={"text": "سلام پوستم قرمز شده. سرم درد میکنه تب هم دارم"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+
+    # Sorted by confidence desc: 0.87 before 0.51.
+    assert [d["evidence_id"] for d in body["detected"]] == ["E_19_0001", "E_19_0002"]
+    assert body["detected"][0]["confidence"] == 0.87
+    assert body["detected"][0]["name"] == "skin_lesions"
+    assert body["detected"][0]["name_fa"] == "ضایعات پوستی"
+    assert body["detected"][0]["data_type"] == "B"
+    assert body["detected"][0]["code_question"] == "E_19_0001"
+
+    # Response envelope.
+    assert body["threshold"] == 0.3
+    assert body["apply_hierarchy_filter"] is True
+    assert body["truncated"] is False
+    assert body["model_version"] == settings.MODEL_VERSION
+    assert isinstance(body["inference_time_ms"], float)
+
+
+@pytest.mark.asyncio
+async def test_extract_passes_through_metadata(client):
+    resp = await client.post(
+        "/extract", headers=AUTH_HEADERS, json={"text": "راش قرمز است"}
+    )
+    assert resp.status_code == 200
+    color = next(d for d in resp.json()["detected"] if d["evidence_id"] == "E_19_0002")
+    # "possible-values" keeps its original hyphenated key (pass-through).
+    assert color["possible-values"] == ["V_11", "V_157"]
+    assert color["value_meaning"]["V_157"]["en"] == "red"
+    assert color["default_value"] == "V_11"
+    assert color["question_fa"] == "راش/ضایعه چه رنگی است؟"
+
+
+@pytest.mark.asyncio
+async def test_extract_empty_text_returns_empty(client):
+    resp = await client.post("/extract", headers=AUTH_HEADERS, json={"text": ""})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["detected"] == []
+    assert body["truncated"] is False
+
+
+@pytest.mark.asyncio
+async def test_extract_whitespace_only_text_returns_empty(client):
+    resp = await client.post("/extract", headers=AUTH_HEADERS, json={"text": "   \n\t  "})
+    assert resp.status_code == 200
+    assert resp.json()["detected"] == []
+
+
+@pytest.mark.asyncio
+async def test_extract_long_text_is_truncated(client):
+    resp = await client.post("/extract", headers=AUTH_HEADERS, json={"text": "م" * 6000})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["truncated"] is True
+    assert len(body["text"]) == 5000
+
+
+@pytest.mark.asyncio
+async def test_extract_high_threshold_keeps_only_top(client, monkeypatch):
+    # The spec's default fixture (0.87 / 0.51) would return nothing with a
+    # strict "> 0.9" filter, so this test uses a top prediction of 0.95
+    # (documented in README ## Decisions).
+    monkeypatch.setattr(
+        nlp_service_module,
+        "nlp_service",
+        FakeNLPService(predictions=[("E_19_0001", 0.95), ("E_19_0002", 0.51)]),
+    )
+    resp = await client.post(
+        "/extract",
+        headers=AUTH_HEADERS,
+        json={"text": "بیمار تب دارد", "threshold": 0.9},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["threshold"] == 0.9
+    assert len(body["detected"]) == 1
+    assert body["detected"][0]["evidence_id"] == "E_19_0001"
+    assert body["detected"][0]["confidence"] == 0.95
+
+
+@pytest.mark.asyncio
+async def test_hierarchy_filter_drops_orphan_child(client, monkeypatch):
+    # Child (rash color) predicted, parent (rash present) below threshold —
+    # clinically meaningless, so the child must be filtered out.
+    monkeypatch.setattr(
+        nlp_service_module,
+        "nlp_service",
+        FakeNLPService(predictions=[("E_19_0002", 0.8)]),
+    )
+    resp = await client.post(
+        "/extract",
+        headers=AUTH_HEADERS,
+        json={"text": "راش قرمز است", "apply_hierarchy_filter": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["detected"] == []
+
+
+@pytest.mark.asyncio
+async def test_no_hierarchy_filter_keeps_child(client, monkeypatch):
+    monkeypatch.setattr(
+        nlp_service_module,
+        "nlp_service",
+        FakeNLPService(predictions=[("E_19_0002", 0.8)]),
+    )
+    resp = await client.post(
+        "/extract",
+        headers=AUTH_HEADERS,
+        json={"text": "راش قرمز است", "apply_hierarchy_filter": False},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["apply_hierarchy_filter"] is False
+    assert [d["evidence_id"] for d in body["detected"]] == ["E_19_0002"]
+
+
+@pytest.mark.asyncio
+async def test_top_k_limits_results(client, monkeypatch):
+    monkeypatch.setattr(
+        nlp_service_module,
+        "nlp_service",
+        FakeNLPService(
+            predictions=[("E_19_0001", 0.87), ("E_19_0003", 0.75), ("E_19_0002", 0.51)]
+        ),
+    )
+    resp = await client.post(
+        "/extract",
+        headers=AUTH_HEADERS,
+        json={"text": "تب و ضایعه پوستی دارم", "top_k": 1},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["detected"]) == 1
+    assert body["detected"][0]["evidence_id"] == "E_19_0001"
+
+
+@pytest.mark.asyncio
+async def test_extract_invalid_threshold_returns_422(client):
+    resp = await client.post(
+        "/extract",
+        headers=AUTH_HEADERS,
+        json={"text": "سلام", "threshold": 1.5},
+    )
+    assert resp.status_code == 422
+
+
+──────────────────────────────────────────────────────────────────────
+📄 tests/test_health.py
+──────────────────────────────────────────────────────────────────────
+"""Tests for GET /health and GET /model-info."""
+import pytest
+
+from app.config import settings
+from app.services import nlp_service as nlp_service_module
+from tests.conftest import AUTH_HEADERS, FakeNLPService
+
+
+@pytest.mark.asyncio
+async def test_health_healthy_when_model_loaded(client):
+    resp = await client.get("/health")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "healthy"
+    assert body["model_loaded"] is True
+    assert body["device"] == "cpu"
+    assert body["evidence_count"] == 3
+    assert "error" not in body  # response_model_exclude_none
+
+
+@pytest.mark.asyncio
+async def test_health_unhealthy_when_model_not_loaded(client, monkeypatch):
+    monkeypatch.setattr(
+        nlp_service_module, "nlp_service", FakeNLPService(loaded=False)
+    )
+    resp = await client.get("/health")
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["status"] == "unhealthy"
+    assert body["model_loaded"] is False
+    assert body["error"]
+
+
+@pytest.mark.asyncio
+async def test_model_info_returns_expected_fields(client):
+    resp = await client.get("/model-info", headers=AUTH_HEADERS)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["model_name"] == "HooshvareLab/bert-fa-base-uncased"
+    assert body["checkpoint_path"] == settings.MODEL_PATH
+    assert body["evidence_path"] == settings.EVIDENCE_PATH
+    assert body["model_version"] == settings.MODEL_VERSION
+    assert body["evidence_count"] == 3
+    assert body["threshold_default"] == 0.3
+    assert body["max_len"] == 128
+    assert body["device"] == "cpu"
+    # From the checkpoint dict: checkpoint.get("f1"), checkpoint.get("epoch").
+    assert body["training_f1"] == 0.84
+    assert body["training_epoch"] == 3
+    assert body["loaded_at"] == "2026-01-15T10:30:00Z"
+
+
+@pytest.mark.asyncio
+async def test_model_info_returns_503_when_model_not_loaded(client, monkeypatch):
+    monkeypatch.setattr(
+        nlp_service_module, "nlp_service", FakeNLPService(loaded=False)
+    )
+    resp = await client.get("/model-info", headers=AUTH_HEADERS)
+    assert resp.status_code == 503
+    assert "detail" in resp.json()
+
+
+======================================================================
+✅ پایان

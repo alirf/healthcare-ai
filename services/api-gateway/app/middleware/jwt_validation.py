@@ -15,7 +15,7 @@ PUBLIC_ROUTES = {
     "/auth/refresh",
     "/auth/health",
     "/api/auth/login",
-    "/api/auth/register", 
+    "/api/auth/register",
     "/api/auth/verify-otp",
     "/api/auth/refresh",
     "/api/auth/health",
@@ -26,32 +26,43 @@ PUBLIC_ROUTES = {
 }
 
 
+def _is_public(path: str) -> bool:
+    # برابری دقیق یا زیرمسیر واقعی (با "/" بعدش)، نه فقط startswith خام
+    # تا مثلاً "/auth/login-something" به اشتباه عمومی تشخیص داده نشود.
+    if path in PUBLIC_ROUTES:
+        return True
+    return any(path.startswith(route + "/") for route in PUBLIC_ROUTES)
+
+
 class JWTValidationMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, **kwargs):
         super().__init__(app)
         self.public_key = Path(settings.PUBLIC_KEY_PATH).read_text()
-    
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        
-        if any(path.startswith(route) for route in PUBLIC_ROUTES):
+
+        if request.method == "OPTIONS":
             return await call_next(request)
-        
+
+        if _is_public(path):
+            return await call_next(request)
+
         auth_header = request.headers.get("authorization")
         if not auth_header:
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Token not sent.", "code": "MISSING_TOKEN"}
             )
-        
+
         if not auth_header.startswith("Bearer "):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "The token format is invalid.", "code": "INVALID_TOKEN_FORMAT"}
             )
-        
+
         token = auth_header.replace("Bearer ", "")
-        
+
         try:
             payload = jwt.decode(
                 token,
@@ -59,11 +70,11 @@ class JWTValidationMiddleware(BaseHTTPMiddleware):
                 algorithms=["RS256"],
                 options={"require": ["exp", "sub", "role"]}
             )
-            
+
             request.state.user_id = payload.get("sub")
             request.state.user_role = payload.get("role")
             request.state.token_payload = payload
-            
+
         except jwt.ExpiredSignatureError:
             return JSONResponse(
                 status_code=401,
@@ -74,5 +85,5 @@ class JWTValidationMiddleware(BaseHTTPMiddleware):
                 status_code=401,
                 content={"detail": f"Token is invalid: {str(e)}", "code": "INVALID_TOKEN"}
             )
-        
+
         return await call_next(request)

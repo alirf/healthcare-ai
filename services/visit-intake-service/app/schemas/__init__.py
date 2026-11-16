@@ -26,5 +26,10 @@ from app.schemas.clinical import (
 )
 from app.schemas.chat import ChatMessageCreate, ChatMessageResponse
 from app.schemas.internal import VisitContextResponse
+from app.schemas.nlp import (
+    DetectedEvidence,
+    ExtractResult,
+    EvidenceExtractionResponse,
+)
 
 __all__ = [name for name in dir() if not name.startswith("_")]

@@ -12,114 +12,98 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, **kwargs):
         super().__init__(app)
         self.redis = get_redis_client()
-        self.public_limit = settings.RATE_LIMIT_PUBLIC
-        self.auth_limit = settings.RATE_LIMIT_AUTH
-        self.ai_triage_limit = settings.RATE_LIMIT_AI_TRIAGE
-        self.profile_limit = settings.RATE_LIMIT_PROFILE
-        self.intake_limit = settings.RATE_LIMIT_INTAKE
-    
+        self.limits = {
+            "public": settings.RATE_LIMIT_PUBLIC,
+            "auth": settings.RATE_LIMIT_AUTH,
+            "profile": settings.RATE_LIMIT_PROFILE,
+            "intake": settings.RATE_LIMIT_INTAKE,
+            "records": settings.RATE_LIMIT_RECORD,
+        }
+
     def _get_key(self, identifier: str, window: int) -> str:
         current_window = int(time.time()) // window
         return f"rate_limit:{identifier}:{current_window}"
-    
-    def _check_limit(self, key: str, limit: int, window: int = 60) -> tuple[bool, int, int]:
+
+    async def _check_limit(self, key: str, limit: int, window: int = 60) -> tuple[bool, int, int]:
         pipe = self.redis.pipeline()
         pipe.incr(key)
         pipe.expire(key, window)
-        results = pipe.execute()
-        
+        results = await pipe.execute()
+
         current_count = results[0]
         remaining = max(0, limit - current_count)
         reset_after = window - (int(time.time()) % window)
-        
+
         allowed = current_count <= limit
         return allowed, remaining, reset_after
-    
+
+    async def _enforce(self, request, call_next, identifier: str, limit: int, error_code: str, detail: str):
+        allowed, remaining, reset_after = await self._check_limit(self._get_key(identifier, 60), limit)
+        if not allowed:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": detail, "code": error_code, "retry_after": reset_after},
+                headers={"Retry-After": str(reset_after)},
+            )
+        response = await call_next(request)
+        response.headers["X-RateLimit-Remaining"] = str(remaining)
+        return response
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        
-        public_paths = ["/api/auth/login", "/api/auth/register", "/api/auth/verify-otp"]
+
+        # مسیرهای عمومی (لاگین/ثبت‌نام) — بر اساس IP، قبل از احراز هویت
+        public_paths = ("/api/auth/login", "/api/auth/register", "/api/auth/verify-otp")
         if any(path.startswith(p) for p in public_paths):
-            identifier = f"ip:{request.client.host}"
-            allowed, remaining, reset_after = self._check_limit(
-                self._get_key(identifier, 60), self.public_limit
+            client_ip = request.client.host if request.client else "unknown"
+            return await self._enforce(
+                request, call_next,
+                identifier=f"ip:{client_ip}",
+                limit=self.limits["public"],
+                error_code="RATE_LIMIT_EXCEEDED",
+                detail="Access from this IP address has been rate-limited",
             )
-            if not allowed:
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "detail": "Access from this IP address has been rate-limited",
-                        "code": "RATE_LIMIT_EXCEEDED",
-                        "retry_after": reset_after
-                    },
-                    headers={"Retry-After": str(reset_after)}
-                )
-            response = await call_next(request)
-            response.headers["X-RateLimit-Remaining"] = str(remaining)
-            return response
-        
-        profile_paths = ["/api/profile/"]
-        if any(path.startswith(p) for p in profile_paths):
-            user_id = getattr(request.state, "user_id", None)
-            if user_id:
-                identifier = f"user:{user_id}:profile"
-                allowed, remaining, reset_after = self._check_limit(
-                    self._get_key(identifier, 60), self.profile_limit
-                )
-                if not allowed:
-                    return JSONResponse(
-                        status_code=429,
-                        content={
-                            "detail": "Access from this IP address has been rate-limited",
-                            "code": "PROFILE_RATE_LIMIT_EXCEEDED",
-                            "retry_after": reset_after
-                        },
-                        headers={"Retry-After": str(reset_after)}
-                    )
-                response = await call_next(request)
-                response.headers["X-RateLimit-Remaining"] = str(remaining)
-                return response
-        
-        intake_paths = ["/api/intake/"]
-        if any(path.startswith(p) for p in intake_paths):
-            user_id = getattr(request.state, "user_id", None)
-            if user_id:
-                identifier = f"user:{user_id}:intake"
-                allowed, remaining, reset_after = self._check_limit(
-                    self._get_key(identifier, 60), self.intake_limit
-                )
-                if not allowed:
-                    return JSONResponse(
-                        status_code=429,
-                        content={
-                            "detail": "Visit intake rate limit exceeded",
-                            "code": "INTAKE_RATE_LIMIT_EXCEEDED",
-                            "retry_after": reset_after
-                        },
-                        headers={"Retry-After": str(reset_after)}
-                    )
-                response = await call_next(request)
-                response.headers["X-RateLimit-Remaining"] = str(remaining)
-                return response
-        
+
         user_id = getattr(request.state, "user_id", None)
-        if user_id:
-            identifier = f"user:{user_id}"
-            allowed, remaining, reset_after = self._check_limit(
-                self._get_key(identifier, 60), self.auth_limit
+
+        # مسیرهای محافظت‌شده‌ای که به این‌جا می‌رسند باید user_id داشته باشند
+        # (چون JWTValidationMiddleware قبل از این اجرا شده). اگر نداشت، یعنی مسیر
+        # عمومی دیگری بوده که نیاز به rate limit خاص کاربر ندارد.
+        if not user_id:
+            return await call_next(request)
+
+        if path.startswith("/api/profile/"):
+            return await self._enforce(
+                request, call_next,
+                identifier=f"user:{user_id}:profile",
+                limit=self.limits["profile"],
+                error_code="PROFILE_RATE_LIMIT_EXCEEDED",
+                detail="Profile service rate limit exceeded",
             )
-            if not allowed:
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "detail": "Access from this IP address has been rate-limited",
-                        "code": "RATE_LIMIT_EXCEEDED",
-                        "retry_after": reset_after
-                    },
-                    headers={"Retry-After": str(reset_after)}
-                )
-            response = await call_next(request)
-            response.headers["X-RateLimit-Remaining"] = str(remaining)
-            return response
-        
-        return await call_next(request)
+
+        if path.startswith("/api/intake/"):
+            return await self._enforce(
+                request, call_next,
+                identifier=f"user:{user_id}:intake",
+                limit=self.limits["intake"],
+                error_code="INTAKE_RATE_LIMIT_EXCEEDED",
+                detail="Visit intake rate limit exceeded",
+            )
+
+        if path.startswith("/api/records/"):
+            return await self._enforce(
+                request, call_next,
+                identifier=f"user:{user_id}:records",
+                limit=self.limits["records"],
+                error_code="RECORD_RATE_LIMIT_EXCEEDED",
+                detail="Medical record rate limit exceeded",
+            )
+
+        # محدودیت عمومی برای هر کاربر احراز هویت‌شده روی سایر مسیرها
+        return await self._enforce(
+            request, call_next,
+            identifier=f"user:{user_id}",
+            limit=self.limits["auth"],
+            error_code="RATE_LIMIT_EXCEEDED",
+            detail="Rate limit exceeded for this user",
+        )

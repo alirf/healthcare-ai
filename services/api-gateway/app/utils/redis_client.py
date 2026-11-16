@@ -1,4 +1,5 @@
-import redis
+# app/utils/redis_client.py
+import redis.asyncio as redis
 from app.config import settings
 
 

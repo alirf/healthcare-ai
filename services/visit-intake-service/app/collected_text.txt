@@ -1,0 +1,4201 @@
+==============================================================================
+📦 PROJECT FILES COLLECTION — برای ارسال به LLM
+==============================================================================
+📁 پوشه مبدا:        D:\med\healthcare-ai\services\visit-intake-service\app
+🗓  تاریخ تولید:      2026-11-11 23:47:45
+📊 تعداد فایل‌ها:    34
+📏 مجموع خطوط:      3,989
+💾 مجموع حجم:       135.7 KB
+⚙  حداکثر حجم فایل: 300 KB
+
+──────────────────────────────────────────────────────────────────────────────
+📂 پوشه‌های نادیده‌گرفته‌شده:
+──────────────────────────────────────────────────────────────────────────────
+(هیچ‌کدام)
+
+──────────────────────────────────────────────────────────────────────────────
+⚡ پسوندهای مجاز:
+──────────────────────────────────────────────────────────────────────────────
+.adoc, .bash, .bat, .c, .cfg, .clj, .cmd, .conf, .cpp, .cs, .css, .csv, .dart, .dockerignore, .editorconfig, .env, .env.example, .env.local, .env.production, .ex, .example, .exs, .fish, .gitignore, .go, .gql, .graphql, .h, .hpp, .htm, .html, .ini, .java, .js, .json, .jsx, .kt, .less, .lua, .m, .md, .php, .properties, .proto, .ps1, .py, .r, .rb, .rs, .rst, .sass, .scala, .scss, .sh, .sql, .svelte, .swift, .toml, .ts, .tsv, .tsx, .txt, .vue, .xml, .yaml, .yml, .zsh
+
+──────────────────────────────────────────────────────────────────────────────
+🌳 درخت فایل‌های جمع‌آوری‌شده:
+──────────────────────────────────────────────────────────────────────────────
+  ./
+    └── __init__.py
+    └── config.py
+    └── database.py
+    └── exceptions.py
+    └── main.py
+  dependencies/
+    └── __init__.py
+    └── auth.py
+  models/
+    └── __init__.py
+    └── chat.py
+    └── clinical.py
+    └── diagnosis.py
+    └── message.py
+    └── visit.py
+  routers/
+    └── __init__.py
+    └── chat.py
+    └── diagnosis.py
+    └── doctor.py
+    └── internal.py
+    └── patient.py
+    └── preview.py
+  schemas/
+    └── __init__.py
+    └── chat.py
+    └── clinical.py
+    └── diagnosis.py
+    └── internal.py
+    └── nlp.py
+    └── visit.py
+  services/
+    └── __init__.py
+    └── diagnosis_client.py
+    └── evidence_extraction.py
+    └── nlp_client.py
+    └── record_sync.py
+    └── storage_service.py
+    └── visit_service.py
+
+==============================================================================
+📄 محتوای فایل‌ها
+==============================================================================
+
+──────────────────────────────────────────────────────────────────────────────
+[1/34] __init__.py
+    1 lines · 0 B
+──────────────────────────────────────────────────────────────────────────────
+
+
+──────────────────────────────────────────────────────────────────────────────
+[2/34] config.py
+    96 lines · 3.4 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Application configuration using Pydantic Settings.
+
+Backward-compatible: keeps BOTH the old AI_NLP_* names (so the original
+evidence_extraction.py and nlp_client.py keep working) AND the new
+AI_TRIAGE_* names (so the updated nlp_client.py that targets
+ai-triage-service also works).
+
+NEW: AI_DIAGNOSIS_* settings for the diagnosis flow (doctor claims visit →
+visit-intake-service calls ai-triage-service POST /visits/{id}/diagnose,
+stores the predictions, exposes them via GET /visits/{id}/ai-diagnosis).
+"""
+from functools import lru_cache
+from typing import Optional
+
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables."""
+
+    APP_NAME: str = "Visit Intake Service"
+    DEBUG: bool = False
+
+    # Database (database-per-service: visits_db)
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost:5432/visits_db"
+
+    # JWT
+    JWT_PUBLIC_KEY_PATH: str = "./keys/public.pem"
+    JWT_ALGORITHM: str = "RS256"
+
+    # Object Storage (MinIO/S3-compatible)
+    MINIO_ENDPOINT: str = "minio:9000"
+    MINIO_ACCESS_KEY: str = ""
+    MINIO_SECRET_KEY: str = ""
+    MINIO_BUCKET_NAME: str = "visit-files"
+    MINIO_SECURE: bool = False
+
+    # Internal API Security
+    INTERNAL_API_KEY: str = ""
+
+    # medical-record-service (sync hook)
+    MEDICAL_RECORD_SERVICE_URL: str = "http://localhost:8000"
+
+    # ── AI orchestration ──────────────────────────────────────────────
+    # NEW names (preferred — used by the updated nlp_client.py)
+    AI_TRIAGE_SERVICE_URL: str = "http://ai-triage-service:8000"
+    AI_TRIAGE_ENABLED: bool = True
+    AI_TRIAGE_TIMEOUT_SECONDS: float = 30.0
+
+    # OLD names (kept for backward compat with the original evidence_extraction.py
+    # and any other code that hasn't been updated yet).
+    AI_NLP_SERVICE_URL: str = "http://ai-triage-service:8000"  # mirror triage URL for compat
+    AI_NLP_ENABLED: bool = True
+    AI_NLP_TIMEOUT_SECONDS: float = 30.0
+
+    # Shared by both old and new code paths
+    AI_NLP_TEXT_MAX_CHARS: int = 5000
+    AI_NLP_THRESHOLD: Optional[float] = None   # None -> use the service default (0.3)
+
+    # ── NEW — Diagnosis flow ──────────────────────────────────────────
+    # When a doctor claims a visit, visit-intake-service calls
+    # ai-triage-service POST /visits/{visit_id}/diagnose to get disease
+    # predictions, stores them in visits_db.ai_diagnosis_suggestions, and
+    # exposes them via GET /visits/{visit_id}/ai-diagnosis.
+    AI_DIAGNOSIS_ENABLED: bool = True
+    AI_DIAGNOSIS_TOP_K: int = 10
+    AI_DIAGNOSIS_TIMEOUT_SECONDS: float = 45.0   # diagnosis takes longer than extract
+
+    # If true, the doctor's claim-visit endpoint automatically triggers AI
+    # diagnosis. If false, the doctor must hit POST /visits/{id}/diagnose
+    # explicitly (useful for development / A/B testing).
+    AI_DIAGNOSIS_TRIGGER_ON_CLAIM: bool = True
+
+    # File Upload
+    MAX_ATTACHMENT_SIZE_MB: int = 25
+    ALLOWED_ATTACHMENT_TYPES: list[str] = [
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "application/pdf",
+        "audio/mpeg",
+        "audio/wav",
+        "video/mp4",
+    ]
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        extra = "ignore"   # ← tolerate unknown env vars instead of crashing
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    """Return cached settings instance."""
+    return Settings()
+
+──────────────────────────────────────────────────────────────────────────────
+[3/34] database.py
+    42 lines · 988 B
+──────────────────────────────────────────────────────────────────────────────
+"""Database configuration and session management."""
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.orm import DeclarativeBase
+
+from app.config import get_settings
+
+settings = get_settings()
+
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=settings.DEBUG,
+    pool_size=20,
+    max_overflow=10,
+    pool_pre_ping=True,
+    pool_recycle=3600,
+)
+
+AsyncSessionLocal = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autoflush=False,
+)
+
+
+class Base(DeclarativeBase):
+    """Base class for all SQLAlchemy models."""
+    pass
+
+
+async def get_db():
+    """Yield an async database session for FastAPI dependency injection."""
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+──────────────────────────────────────────────────────────────────────────────
+[4/34] dependencies/__init__.py
+    1 lines · 0 B
+──────────────────────────────────────────────────────────────────────────────
+
+
+──────────────────────────────────────────────────────────────────────────────
+[5/34] dependencies/auth.py
+    113 lines · 3.4 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Authentication dependencies for FastAPI."""
+from typing import Optional
+
+from fastapi import Depends, HTTPException, status, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from jose import JWTError, jwt
+
+from app.config import get_settings
+from app.exceptions import InternalAPIKeyError
+
+security = HTTPBearer(auto_error=False)
+
+
+async def get_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> dict:
+    """Validate user identity from JWT OR trusted Gateway headers.
+
+    Priority:
+    1. If x-gateway-request header exists -> Trust x-user-id/x-user-role (Gateway already validated)
+    2. Otherwise -> Validate JWT locally (direct access or other services)
+    """
+    settings = get_settings()
+
+    is_gateway_request = request.headers.get("x-gateway-request") == "true"
+    user_id_from_gateway = request.headers.get("x-user-id")
+    user_role_from_gateway = request.headers.get("x-user-role")
+
+    if is_gateway_request and user_id_from_gateway:
+        return {
+            "sub": user_id_from_gateway,
+            "role": user_role_from_gateway,
+            "source": "gateway",
+        }
+
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header missing",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        with open(settings.JWT_PUBLIC_KEY_PATH, "r") as f:
+            public_key = f.read()
+
+        payload = jwt.decode(
+            credentials.credentials,
+            public_key,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token: missing subject",
+            )
+
+        payload["source"] = "jwt"
+        return payload
+
+    except JWTError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid token: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="JWT public key not found",
+        )
+
+
+def require_role(required_role: str):
+    """Dependency factory to enforce role-based access control."""
+    async def role_checker(
+        current_user: dict = Depends(get_current_user)
+    ) -> dict:
+        user_roles = current_user.get("roles", [])
+        if isinstance(user_roles, str):
+            user_roles = [user_roles]
+        user_role = current_user.get("role")
+        if user_role:
+            user_roles.append(user_role)
+
+        if required_role not in user_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied. Required role: {required_role}",
+            )
+        return current_user
+
+    return role_checker
+
+
+async def verify_internal_api_key(
+    request: Request,
+    x_internal_api_key: Optional[str] = None
+) -> bool:
+    """Verify service-to-service API key for internal endpoints."""
+    settings = get_settings()
+
+    if x_internal_api_key is None:
+        x_internal_api_key = request.headers.get("X-Internal-API-Key")
+
+    if not x_internal_api_key or x_internal_api_key != settings.INTERNAL_API_KEY:
+        raise InternalAPIKeyError()
+
+    return True
+
+──────────────────────────────────────────────────────────────────────────────
+[6/34] exceptions.py
+    455 lines · 13.5 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Custom exceptions for visit-intake-service.
+
+Comprehensive: includes ALL exception names that patient.py, doctor.py,
+chat.py, diagnosis.py, internal.py, preview.py might import.
+
+If you add a new router that needs a new exception, add it here too.
+
+Naming convention:
+  - *NotFoundError    → 404 (subclass of NotFoundError)
+  - *AlreadyExistsError → 409 (subclass of VisitStateError)
+  - *UnavailableError → 502 (subclass of VisitIntakeError)
+  - *Error (other)    → 422 or 500 depending on context
+"""
+from fastapi import HTTPException, status
+
+
+# =====================================================================
+# Base class
+# =====================================================================
+
+class VisitIntakeError(HTTPException):
+    """Base class for visit-intake errors."""
+
+    def __init__(self, status_code: int, detail: str):
+        super().__init__(status_code=status_code, detail=detail)
+
+
+# =====================================================================
+# Auth-related
+# =====================================================================
+
+class InternalAPIKeyError(HTTPException):
+    """Missing or invalid X-Internal-API-Key on internal endpoints."""
+
+    def __init__(self):
+        super().__init__(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid or missing internal API key",
+        )
+
+
+class AuthorizationError(VisitIntakeError):
+    """The caller is not allowed to perform this action on this visit."""
+
+    def __init__(self, detail: str = "Not authorized for this visit"):
+        super().__init__(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
+class PermissionDeniedError(AuthorizationError):
+    """Alias for AuthorizationError — بعضی فایل‌ها از این نام استفاده می‌کنند."""
+
+    def __init__(self, detail: str = "Permission denied"):
+        super().__init__(detail=detail)
+
+
+class ForbiddenAccessError(AuthorizationError):
+    """دسترسی به این منبع ممنوع است — alias برای AuthorizationError.
+
+    استفاده در patient.py: وقتی بیمار سعی می‌کند به ویزیت دیگری دسترسی پیدا کند.
+    """
+
+    def __init__(self, detail: str = "Forbidden: access denied"):
+        super().__init__(detail=detail)
+
+
+# =====================================================================
+# Not found errors (404)
+# =====================================================================
+
+class NotFoundError(VisitIntakeError):
+    """A requested resource was not found."""
+
+    def __init__(self, detail: str = "Resource not found"):
+        super().__init__(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+
+
+class VisitNotFoundError(NotFoundError):
+    """Visit با این ID یافت نشد."""
+
+    def __init__(
+        self, detail: str = "Visit not found", visit_id: str | None = None
+    ):
+        if visit_id:
+            detail = f"Visit {visit_id} not found"
+        super().__init__(detail=detail)
+
+
+class SymptomNotFoundError(NotFoundError):
+    """علامت با این ID در این ویزیت یافت نشد."""
+
+    def __init__(
+        self, detail: str = "Symptom not found", symptom_id: str | None = None
+    ):
+        if symptom_id:
+            detail = f"Symptom {symptom_id} not found"
+        super().__init__(detail=detail)
+
+
+class MessageNotFoundError(NotFoundError):
+    """پیام با این ID در این ویزیت یافت نشد."""
+
+    def __init__(
+        self, detail: str = "Message not found", message_id: str | None = None
+    ):
+        if message_id:
+            detail = f"Message {message_id} not found"
+        super().__init__(detail=detail)
+
+
+class AttachmentNotFoundError(NotFoundError):
+    """فایل پیوست با این ID یافت نشد."""
+
+    def __init__(self, detail: str = "Attachment not found"):
+        super().__init__(detail=detail)
+
+
+class ChatNotFoundError(NotFoundError):
+    """گفتگو با این ID یافت نشد."""
+
+    def __init__(self, detail: str = "Chat not found"):
+        super().__init__(detail=detail)
+
+
+class RecordNotFoundError(NotFoundError):
+    """پرونده با این ID یافت نشد."""
+
+    def __init__(self, detail: str = "Record not found"):
+        super().__init__(detail=detail)
+
+
+class DiagnosisNotFoundError(NotFoundError):
+    """هیچ پیشنهاد تشخیصی برای این ویزیت ذخیره نشده است."""
+
+    def __init__(
+        self,
+        detail: str = "No AI diagnosis suggestions stored for this visit",
+    ):
+        super().__init__(detail=detail)
+
+
+class AIDiagnosisNotFoundError(DiagnosisNotFoundError):
+    """Alias برای DiagnosisNotFoundError."""
+
+    pass
+
+
+class FinalDiagnosisNotFoundError(NotFoundError):
+    """هیچ تشخیص نهایی برای این ویزیت ثبت نشده است."""
+
+    def __init__(
+        self,
+        detail: str = "No final diagnosis submitted for this visit yet",
+    ):
+        super().__init__(detail=detail)
+
+
+class SuggestionNotFoundError(NotFoundError):
+    """پیشنهاد تشخیص با این ID یافت نشد."""
+
+    def __init__(self, detail: str = "Suggestion not found"):
+        super().__init__(detail=detail)
+
+
+class PatientNotFoundError(NotFoundError):
+    """بیمار با این ID یافت نشد."""
+
+    def __init__(self, detail: str = "Patient not found"):
+        super().__init__(detail=detail)
+
+
+class DoctorNotFoundError(NotFoundError):
+    """پزشک با این ID یافت نشد."""
+
+    def __init__(self, detail: str = "Doctor not found"):
+        super().__init__(detail=detail)
+
+
+class UserNotFoundError(NotFoundError):
+    """کاربر با این ID یافت نشد."""
+
+    def __init__(self, detail: str = "User not found"):
+        super().__init__(detail=detail)
+
+
+class PrescriptionNotFoundError(NotFoundError):
+    """نسخه با این ID یافت نشد."""
+
+    def __init__(
+        self, detail: str = "Prescription not found", prescription_id: str | None = None
+    ):
+        if prescription_id:
+            detail = f"Prescription {prescription_id} not found"
+        super().__init__(detail=detail)
+
+
+# =====================================================================
+# Already-exists errors (409)
+# =====================================================================
+
+class VisitStateError(VisitIntakeError):
+    """Visit در وضعیتی نیست که این عمل روی آن انجام شود."""
+
+    def __init__(
+        self,
+        detail: str = "Visit is not in the correct state for this operation",
+    ):
+        super().__init__(status_code=status.HTTP_409_CONFLICT, detail=detail)
+
+
+class VisitAlreadyExistsError(VisitStateError):
+    """Visit با این مشخصات قبلاً ساخته شده."""
+
+    def __init__(self, detail: str = "Visit already exists"):
+        super().__init__(detail=detail)
+
+
+class VisitAlreadySubmittedError(VisitStateError):
+    """بیمار قبلاً ویزیت را submit کرده."""
+
+    def __init__(
+        self, detail: str = "Visit has already been submitted to a doctor"
+    ):
+        super().__init__(detail=detail)
+
+
+class VisitNotClaimedError(VisitStateError):
+    """ویزیت هنوز توسط پزشکی claim نشده است."""
+
+    def __init__(
+        self, detail: str = "Visit has not been claimed by a doctor yet"
+    ):
+        super().__init__(detail=detail)
+
+
+class VisitAlreadyClaimedError(VisitStateError):
+    """ویزیت قبلاً توسط پزشک دیگری claim شده است."""
+
+    def __init__(
+        self, detail: str = "Visit has already been claimed by another doctor"
+    ):
+        super().__init__(detail=detail)
+
+
+class VisitCompletedError(VisitStateError):
+    """ویزیت قبلاً تکمیل شده است."""
+
+    def __init__(self, detail: str = "Visit has already been completed"):
+        super().__init__(detail=detail)
+
+
+class FinalDiagnosisAlreadyExistsError(VisitStateError):
+    """تشخیص نهایی قبلاً برای این ویزیت ثبت شده (idempotent update)."""
+
+    def __init__(
+        self, detail: str = "Final diagnosis already submitted for this visit"
+    ):
+        super().__init__(detail=detail)
+
+
+class SymptomAlreadyExistsError(VisitStateError):
+    """علامت با این مشخصات قبلاً در ویزیت ثبت شده."""
+
+    def __init__(self, detail: str = "Symptom already exists in this visit"):
+        super().__init__(detail=detail)
+
+
+class DuplicateSymptomError(SymptomAlreadyExistsError):
+    """Alias برای SymptomAlreadyExistsError."""
+
+    pass
+
+
+# =====================================================================
+# AI service errors (502)
+# =====================================================================
+
+class NLPServiceUnavailableError(VisitIntakeError):
+    """ai-triage-service (or ai-nlp-service) is unreachable or returned non-200."""
+
+    def __init__(self, detail: str = "AI service is unavailable"):
+        super().__init__(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
+
+
+class DiagnosisServiceUnavailableError(VisitIntakeError):
+    """ai-triage-service / ai-diagnosis-service unreachable or returned an error."""
+
+    def __init__(self, detail: str = "Diagnosis service is unavailable"):
+        super().__init__(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
+
+
+class AIServiceUnavailableError(NLPServiceUnavailableError):
+    """Alias برای NLPServiceUnavailableError."""
+
+    pass
+
+
+class ExternalServiceError(VisitIntakeError):
+    """خطای عمومی سرویس خارجی."""
+
+    def __init__(self, detail: str = "External service error"):
+        super().__init__(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
+
+
+# =====================================================================
+# Validation / diagnosis errors (422)
+# =====================================================================
+
+class DiagnosisError(VisitIntakeError):
+    """Generic diagnosis failure (e.g. conflicting input, invalid suggestion)."""
+
+    def __init__(self, detail: str = "Diagnosis operation failed"):
+        super().__init__(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail)
+
+
+class ValidationError(VisitIntakeError):
+    """ورودی نامعتبر."""
+
+    def __init__(self, detail: str = "Validation error"):
+        super().__init__(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail)
+
+
+class InvalidInputError(ValidationError):
+    """Alias برای ValidationError."""
+
+    pass
+
+
+class InvalidDiagnosisError(DiagnosisError):
+    """تشخیص واردشده نامعتبر است."""
+
+    def __init__(self, detail: str = "Invalid diagnosis data"):
+        super().__init__(detail=detail)
+
+
+class EvidenceExtractionError(VisitIntakeError):
+    """خطا در استخراج evidences از متن بیمار."""
+
+    def __init__(self, detail: str = "Failed to extract evidences from text"):
+        super().__init__(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail)
+
+
+# =====================================================================
+# File / upload errors (413, 415)
+# =====================================================================
+
+class FileUploadError(VisitIntakeError):
+    """خطای عمومی در آپلود فایل."""
+
+    def __init__(self, detail: str = "File upload failed"):
+        super().__init__(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+class FileTooLargeError(VisitIntakeError):
+    """حجم فایل بیش از حد مجاز است."""
+
+    def __init__(self, detail: str = "File size exceeds the maximum allowed limit"):
+        super().__init__(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=detail)
+
+
+class UnsupportedFileTypeError(VisitIntakeError):
+    """نوع فایل پشتیبانی نمی‌شود."""
+
+    def __init__(self, detail: str = "Unsupported file type"):
+        super().__init__(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=detail)
+
+
+# =====================================================================
+# Rate limiting / throttling (429)
+# =====================================================================
+
+class RateLimitExceededError(VisitIntakeError):
+    """بیش از حد درخواست ارسال شده است."""
+
+    def __init__(self, detail: str = "Rate limit exceeded. Please try again later."):
+        super().__init__(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=detail)
+
+
+# =====================================================================
+# Storage errors (500, 503)
+# =====================================================================
+
+class StorageError(VisitIntakeError):
+    """خطای عمومی ذخیره‌سازی."""
+
+    def __init__(self, detail: str = "Storage operation failed"):
+        super().__init__(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
+
+
+class DatabaseError(VisitIntakeError):
+    """خطای پایگاه داده."""
+
+    def __init__(self, detail: str = "Database operation failed"):
+        super().__init__(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
+
+
+# =====================================================================
+# Exports
+# =====================================================================
+
+__all__ = [
+    # Base
+    "VisitIntakeError",
+    # Auth
+    "InternalAPIKeyError",
+    "AuthorizationError",
+    "PermissionDeniedError",
+    "ForbiddenAccessError",
+    # Not found
+    "NotFoundError",
+    "VisitNotFoundError",
+    "SymptomNotFoundError",
+    "MessageNotFoundError",
+    "AttachmentNotFoundError",
+    "ChatNotFoundError",
+    "RecordNotFoundError",
+    "DiagnosisNotFoundError",
+    "AIDiagnosisNotFoundError",
+    "FinalDiagnosisNotFoundError",
+    "SuggestionNotFoundError",
+    "PatientNotFoundError",
+    "DoctorNotFoundError",
+    "UserNotFoundError",
+    "PrescriptionNotFoundError",
+    # State / conflict
+    "VisitStateError",
+    "VisitAlreadyExistsError",
+    "VisitAlreadySubmittedError",
+    "VisitNotClaimedError",
+    "VisitAlreadyClaimedError",
+    "VisitCompletedError",
+    "FinalDiagnosisAlreadyExistsError",
+    "SymptomAlreadyExistsError",
+    "DuplicateSymptomError",
+    # AI services
+    "NLPServiceUnavailableError",
+    "DiagnosisServiceUnavailableError",
+    "AIServiceUnavailableError",
+    "ExternalServiceError",
+    # Validation / diagnosis
+    "DiagnosisError",
+    "ValidationError",
+    "InvalidInputError",
+    "InvalidDiagnosisError",
+    "EvidenceExtractionError",
+    # Files
+    "FileUploadError",
+    "FileTooLargeError",
+    "UnsupportedFileTypeError",
+    # Rate limiting
+    "RateLimitExceededError",
+    # Storage
+    "StorageError",
+    "DatabaseError",
+]
+
+──────────────────────────────────────────────────────────────────────────────
+[7/34] main.py
+    107 lines · 3.8 KB
+──────────────────────────────────────────────────────────────────────────────
+"""FastAPI application factory for Visit Intake Service.
+
+Updated: registers the new diagnosis router (GET/POST /visits/{id}/diagnose,
+GET /visits/{id}/ai-diagnosis, GET/POST /visits/{id}/final-diagnosis) and
+imports the new SQLAlchemy models so the tables are registered with
+Base.metadata.
+
+See PATCH_NOTES.md for the full integration checklist.
+"""
+from contextlib import asynccontextmanager
+
+# Import the models package so SQLAlchemy registers AIDiagnosisSuggestion
+# and FinalDiagnosis with Base.metadata before create_all() runs.
+import app.models  # noqa: F401
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from app.config import get_settings
+# ← preview + diagnosis added: exposes POST /extract-evidences-preview for the
+# chat UI and the /visits/{id}/diagnose, /visits/{id}/ai-diagnosis,
+# /visits/{id}/final-diagnosis endpoints for the doctor/patient UI.
+from app.routers import patient, doctor, chat, internal, preview, diagnosis
+
+settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print(f"🚀 {settings.APP_NAME} starting up...")
+    print(f"   AI diagnosis enabled: {settings.AI_DIAGNOSIS_ENABLED}")
+    print(f"   AI diagnosis trigger on claim: {settings.AI_DIAGNOSIS_TRIGGER_ON_CLAIM}")
+    yield
+    print(f"🛑 {settings.APP_NAME} shutting down...")
+
+
+def create_application() -> FastAPI:
+    app = FastAPI(
+        title=settings.APP_NAME,
+        description="""
+        Healthcare AI - Visit Intake Service
+
+        Manages the full lifecycle of an online consultation:
+        - Intake messages (text + file attachments from patient)
+        - Manual and AI-detected symptoms
+        - AI disease suggestions for the doctor (NEW)
+        - AI prescription drafts
+        - Doctor-patient chat
+        - Final doctor diagnosis with ICD-10 (NEW)
+        - Visit completion → patient sees final diagnosis (NEW)
+
+        Visits can be linked to medical records (medical_record_id);
+        the medical-record service will be added later.
+
+        Preview endpoint POST /extract-evidences-preview lets the frontend
+        chat call ai-nlp-service on free text without creating a visit.
+
+        Diagnosis endpoints:
+          POST /visits/{id}/diagnose          — trigger AI diagnosis
+          GET  /visits/{id}/ai-diagnosis      — fetch stored AI suggestions
+          POST /visits/{id}/final-diagnosis   — doctor's final diagnosis (ICD-10)
+          GET  /visits/{id}/final-diagnosis   — doctor/patient view
+        """,
+        version="1.1.0",
+        lifespan=lifespan,
+        docs_url="/docs" if settings.DEBUG else None,
+        redoc_url="/redoc" if settings.DEBUG else None,
+        redirect_slashes=False,
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"] if settings.DEBUG else [],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    app.include_router(patient.router)
+    app.include_router(doctor.router)
+    app.include_router(chat.router)
+    app.include_router(internal.router)
+    app.include_router(preview.router)     # ← preview router for chat UI
+    app.include_router(diagnosis.router)   # ← NEW diagnosis router
+
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception):
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+    @app.get("/health", tags=["Health"])
+    async def health_check():
+        return {"status": "healthy", "service": settings.APP_NAME}
+
+    @app.get("/", tags=["Root"])
+    async def root():
+        return {
+            "service": settings.APP_NAME,
+            "version": "1.1.0",
+            "docs": "/docs" if settings.DEBUG else None,
+        }
+
+    return app
+
+
+app = create_application()
+
+──────────────────────────────────────────────────────────────────────────────
+[8/34] models/__init__.py
+    5 lines · 209 B
+──────────────────────────────────────────────────────────────────────────────
+"""Models package init — exposes diagnosis models so SQLAlchemy registers them."""
+from app.models.diagnosis import AIDiagnosisSuggestion, FinalDiagnosis
+
+__all__ = ["AIDiagnosisSuggestion", "FinalDiagnosis"]
+
+──────────────────────────────────────────────────────────────────────────────
+[9/34] models/chat.py
+    29 lines · 1.1 KB
+──────────────────────────────────────────────────────────────────────────────
+import uuid
+from datetime import datetime
+
+from sqlalchemy import String, Text, DateTime, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.database import Base
+
+
+class ChatMessage(Base):
+    """A doctor <-> patient chat message during the consultation."""
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    visit_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("visits.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    sender_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    sender_role: Mapped[str] = mapped_column(String(10), nullable=False)  # doctor | patient
+
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+    visit: Mapped["Visit"] = relationship(back_populates="chat_messages")
+
+──────────────────────────────────────────────────────────────────────────────
+[10/34] models/clinical.py
+    148 lines · 6.4 KB
+──────────────────────────────────────────────────────────────────────────────
+import uuid
+from datetime import datetime
+from typing import List, Optional
+
+from sqlalchemy import (
+    String, Text, DateTime, Integer, Float, ForeignKey, UniqueConstraint, JSON,
+)
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.database import Base
+
+# JSONB on PostgreSQL, plain JSON on SQLite (for tests)
+JsonbCompat = JSON().with_variant(JSONB(astext_type=Text()), "postgresql")
+
+
+class VisitSymptom(Base):
+    """Symptom recorded for a visit - either selected manually by the patient
+    or detected automatically by the AI symptom-extraction service."""
+
+    __tablename__ = "visit_symptoms"
+    __table_args__ = (
+        UniqueConstraint("visit_id", "symptom_name", "source", name="uq_visit_symptom_source"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    visit_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("visits.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    symptom_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    source: Mapped[str] = mapped_column(String(10), nullable=False)  # manual | ai
+
+    severity: Mapped[Optional[str]] = mapped_column(String(20))        # mild | moderate | severe
+    body_part: Mapped[Optional[str]] = mapped_column(String(100))
+    onset_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    duration_description: Mapped[Optional[str]] = mapped_column(String(100))
+
+    # AI-specific fields
+    confidence: Mapped[Optional[float]] = mapped_column(Float)
+    ai_model_version: Mapped[Optional[str]] = mapped_column(String(50))
+    doctor_confirmed: Mapped[bool] = mapped_column(default=False)
+
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    visit: Mapped["Visit"] = relationship(back_populates="symptoms")
+
+
+class AIDiseaseSuggestion(Base):
+    """Probable diseases suggested by the AI diagnostic service for the doctor."""
+
+    __tablename__ = "ai_disease_suggestions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    visit_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("visits.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    disease_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    icd10_code: Mapped[Optional[str]] = mapped_column(String(10))
+    probability: Mapped[float] = mapped_column(Float, nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, default=0)
+    rationale: Mapped[Optional[str]] = mapped_column(Text)
+
+    model_version: Mapped[Optional[str]] = mapped_column(String(50))
+
+    doctor_decision: Mapped[str] = mapped_column(String(20), default="pending")  # pending | accepted | rejected
+    decided_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True))
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+    visit: Mapped["Visit"] = relationship(back_populates="disease_suggestions")
+
+
+class AIPrescriptionDraft(Base):
+    """Prescription draft written by the AI service for the doctor to edit."""
+
+    __tablename__ = "ai_prescription_drafts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    visit_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("visits.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    items: Mapped[list] = mapped_column(JsonbCompat, nullable=False, default=list)
+    ai_notes: Mapped[Optional[str]] = mapped_column(Text)
+    model_version: Mapped[Optional[str]] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(20), default="draft")  # draft | superseded
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    visit: Mapped["Visit"] = relationship(back_populates="prescription_drafts")
+
+
+class FinalPrescription(Base):
+    """The final prescription issued by the doctor after editing the AI draft."""
+
+    __tablename__ = "final_prescriptions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    visit_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("visits.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    doctor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+
+    diagnosis_text: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    visit: Mapped["Visit"] = relationship(back_populates="final_prescription")
+    items: Mapped[List["PrescriptionItem"]] = relationship(
+        back_populates="prescription", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+
+class PrescriptionItem(Base):
+    """A single drug line of a final prescription."""
+
+    __tablename__ = "prescription_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    prescription_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("final_prescriptions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    drug_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    dosage: Mapped[Optional[str]] = mapped_column(String(50))
+    frequency: Mapped[Optional[str]] = mapped_column(String(50))
+    duration_days: Mapped[Optional[int]] = mapped_column(Integer)
+    quantity: Mapped[Optional[str]] = mapped_column(String(50))
+    instructions: Mapped[Optional[str]] = mapped_column(Text)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    prescription: Mapped["FinalPrescription"] = relationship(back_populates="items")
+
+──────────────────────────────────────────────────────────────────────────────
+[11/34] models/diagnosis.py
+    134 lines · 5.6 KB
+──────────────────────────────────────────────────────────────────────────────
+"""SQLAlchemy models for AI diagnosis suggestions and final diagnoses.
+
+Two new tables in visits_db:
+
+1. ai_diagnosis_suggestions
+   One row per (visit, disease) prediction. Created when ai-triage-service
+   returns a VisitDiagnosisResponse — we flatten predictions[] into rows so
+   the doctor can sort / filter / pick one easily.
+
+2. final_diagnoses
+   One row per visit (uniqueness enforced by visit_id). Created when the
+   doctor submits POST /visits/{id}/final-diagnosis. The visit status is
+   also updated to "completed" at the same time.
+
+Both tables use native PostgreSQL UUID columns. They are intentionally
+independent of the existing visits table's ORM model — visit_id is just a
+UUID FK (we don't define the relationship here so this module is fully
+drop-in: import it in app/database.py or app/models/__init__.py and the
+tables are created on first `alembic upgrade head` or `Base.metadata.create_all`).
+"""
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+from uuid import UUID, uuid4
+
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+# IMPORTANT: import Base from the existing app.database module.
+# We assume the project already declares a declarative Base. If your project
+# uses a different import path (e.g. from app.models.base import Base),
+# update this import to match.
+try:
+    from app.database import Base
+except ImportError:  # pragma: no cover — fallback so the module loads standalone
+    from sqlalchemy.orm import DeclarativeBase
+
+    class Base(DeclarativeBase):  # type: ignore[no-redef]
+        pass
+
+
+class AIDiagnosisSuggestion(Base):
+    """One stored AI diagnosis suggestion (a single disease prediction).
+
+    Rows are wiped and re-created every time the doctor re-triggers
+    POST /visits/{id}/diagnose — there's no need to keep stale predictions
+    around, but the most recent set is persisted so the doctor can refresh
+    the page without losing the suggestions.
+    """
+
+    __tablename__ = "ai_diagnosis_suggestions"
+    __table_args__ = (
+        # One suggestion per (visit, disease) — re-diagnosis overwrites
+        UniqueConstraint("visit_id", "disease_id", name="uq_ai_diag_visit_disease"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    visit_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("visits.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    disease_id: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    disease_name_fa: Mapped[str] = mapped_column(String(300), nullable=False)
+    disease_name_en: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    icd10: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    ml_probability: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    rule_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    combined_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, index=True)
+    is_emergency: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    severity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    matched_evidences: Mapped[List[Dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    absent_evidences: Mapped[List[Dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    def __repr__(self) -> str:
+        return f"<AIDiagnosisSuggestion {self.disease_id} score={self.combined_score:.3f}>"
+
+
+class FinalDiagnosis(Base):
+    """The doctor's final diagnosis for a visit. One row per visit.
+
+    Created when the doctor submits POST /visits/{id}/final-diagnosis.
+    The visit status is also moved to "completed" at the same time.
+    """
+
+    __tablename__ = "final_diagnoses"
+    __table_args__ = (UniqueConstraint("visit_id", name="uq_final_diag_per_visit"),)
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    visit_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("visits.id", ondelete="CASCADE"),
+        unique=True,
+        index=True,
+        nullable=False,
+    )
+    doctor_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), index=True, nullable=False)
+    disease_name_fa: Mapped[str] = mapped_column(String(300), nullable=False)
+    disease_name_en: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    icd10: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    disease_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    selected_suggestion_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("ai_diagnosis_suggestions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    requires_follow_up: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    follow_up_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    def __repr__(self) -> str:
+        return f"<FinalDiagnosis visit={self.visit_id} disease={self.disease_name_fa}>"
+
+──────────────────────────────────────────────────────────────────────────────
+[12/34] models/message.py
+    42 lines · 1.7 KB
+──────────────────────────────────────────────────────────────────────────────
+import uuid
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import String, Text, DateTime, Integer, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.database import Base
+
+
+class VisitMessage(Base):
+    """A message sent during the intake phase (patient, or AI/system follow-ups).
+
+    Text and/or file attachment, with full timestamps.
+    """
+
+    __tablename__ = "visit_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    visit_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("visits.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    sender_type: Mapped[str] = mapped_column(String(20), default="patient")  # patient | ai | system
+    message_type: Mapped[str] = mapped_column(String(10), default="text")    # text | file
+
+    content: Mapped[Optional[str]] = mapped_column(Text)
+
+    # File attachment metadata (file bytes live in MinIO)
+    attachment_name: Mapped[Optional[str]] = mapped_column(String(255))
+    attachment_content_type: Mapped[Optional[str]] = mapped_column(String(100))
+    attachment_size: Mapped[Optional[int]] = mapped_column(Integer)
+    attachment_key: Mapped[Optional[str]] = mapped_column(Text)
+    attachment_url: Mapped[Optional[str]] = mapped_column(Text)
+
+    sequence: Mapped[int] = mapped_column(Integer, default=0)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+    visit: Mapped["Visit"] = relationship(back_populates="messages")
+
+──────────────────────────────────────────────────────────────────────────────
+[13/34] models/visit.py
+    67 lines · 3.1 KB
+──────────────────────────────────────────────────────────────────────────────
+import uuid
+from datetime import datetime
+from typing import List, Optional
+
+from sqlalchemy import String, Text, DateTime
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.database import Base
+
+
+class Visit(Base):
+    """A single consultation session.
+
+    A patient may have many visits. Several visits can belong to one medical
+    record (e.g. heart-attack record), managed later by the medical-record
+    service - here we only keep the reference (medical_record_id).
+    """
+
+    __tablename__ = "visits"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+
+    # Reference to the medical-record service (separate DB -> plain UUID, no FK)
+    medical_record_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+
+    # Assigned doctor (null until a doctor claims the visit from the queue)
+    doctor_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+
+    # intake -> ai_processing -> doctor_assigned -> in_chat -> prescription_pending
+    #   -> completed -> closed   (cancelled possible from early states)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="intake", index=True)
+
+    chief_complaint: Mapped[Optional[str]] = mapped_column(Text)   # main reason of visit
+    patient_notes: Mapped[Optional[str]] = mapped_column(Text)
+    priority: Mapped[Optional[str]] = mapped_column(String(20))    # low / normal / high / emergency
+
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    doctor_joined_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Relationships
+    messages: Mapped[List["VisitMessage"]] = relationship(
+        back_populates="visit", cascade="all, delete-orphan", lazy="selectin"
+    )
+    symptoms: Mapped[List["VisitSymptom"]] = relationship(
+        back_populates="visit", cascade="all, delete-orphan", lazy="selectin"
+    )
+    disease_suggestions: Mapped[List["AIDiseaseSuggestion"]] = relationship(
+        back_populates="visit", cascade="all, delete-orphan", lazy="selectin"
+    )
+    prescription_drafts: Mapped[List["AIPrescriptionDraft"]] = relationship(
+        back_populates="visit", cascade="all, delete-orphan", lazy="selectin"
+    )
+    chat_messages: Mapped[List["ChatMessage"]] = relationship(
+        back_populates="visit", cascade="all, delete-orphan", lazy="selectin"
+    )
+    final_prescription: Mapped[Optional["FinalPrescription"]] = relationship(
+        back_populates="visit", cascade="all, delete-orphan", uselist=False, lazy="selectin"
+    )
+
+──────────────────────────────────────────────────────────────────────────────
+[14/34] routers/__init__.py
+    1 lines · 0 B
+──────────────────────────────────────────────────────────────────────────────
+
+
+──────────────────────────────────────────────────────────────────────────────
+[15/34] routers/chat.py
+    75 lines · 2.6 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Doctor <-> patient chat endpoints (both roles)."""
+from typing import List
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import get_db
+from app.dependencies.auth import get_current_user
+from app.exceptions import VisitNotFoundError, ForbiddenAccessError, InvalidVisitStateError
+from app.schemas.chat import ChatMessageCreate, ChatMessageResponse
+from app.services.visit_service import VisitService
+
+router = APIRouter(prefix="/visits", tags=["Consultation Chat"])
+
+# Chat is open during these visit statuses
+CHAT_OPEN_STATUSES = {"in_chat", "prescription_pending"}
+
+
+async def get_participant_visit(
+    visit_id: UUID,
+    current_user: dict,
+    db: AsyncSession,
+):
+    """Allow only the owning patient or the assigned doctor."""
+    service = VisitService(db)
+    visit = await service.get_visit(visit_id)
+    if not visit:
+        raise VisitNotFoundError()
+
+    user_id = UUID(current_user["sub"])
+    roles = current_user.get("roles", [])
+    if isinstance(roles, str):
+        roles = [roles]
+    role = current_user.get("role")
+    if role:
+        roles.append(role)
+
+    is_owner = "patient" in roles and visit.patient_id == user_id
+    is_doctor = "doctor" in roles and visit.doctor_id == user_id
+    if not (is_owner or is_doctor):
+        raise ForbiddenAccessError("You are not a participant of this visit")
+    return visit, "patient" if is_owner else "doctor"
+
+
+@router.get("/{visit_id}/chat", response_model=List[ChatMessageResponse])
+async def list_chat_messages(
+    visit_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the whole doctor-patient chat of the visit."""
+    service = VisitService(db)
+    await get_participant_visit(visit_id, current_user, db)
+    return await service.list_chat_messages(visit_id)
+
+
+@router.post("/{visit_id}/chat", response_model=ChatMessageResponse, status_code=status.HTTP_201_CREATED)
+async def send_chat_message(
+    visit_id: UUID,
+    data: ChatMessageCreate,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a chat message (doctor or patient)."""
+    service = VisitService(db)
+    visit, role = await get_participant_visit(visit_id, current_user, db)
+    if visit.status not in CHAT_OPEN_STATUSES:
+        raise InvalidVisitStateError(
+            f"Chat is not open for this visit (status: {visit.status})"
+        )
+    return await service.add_chat_message(
+        visit_id, UUID(current_user["sub"]), role, data.content
+    )
+
+──────────────────────────────────────────────────────────────────────────────
+[16/34] routers/diagnosis.py
+    447 lines · 15.1 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Doctor-side diagnosis endpoints.
+
+Mounted under the patient/doctor API surface (auth: JWT with role=doctor
+or role=patient depending on endpoint).
+
+Endpoints:
+
+  Doctor:
+    POST /visits/{visit_id}/diagnose          — trigger AI diagnosis
+    GET  /visits/{visit_id}/ai-diagnosis      — fetch stored AI suggestions
+    POST /visits/{visit_id}/final-diagnosis   — submit final diagnosis (ICD-10)
+    GET  /visits/{visit_id}/final-diagnosis   — fetch final diagnosis (after completion)
+
+  Patient:
+    GET  /visits/{visit_id}/final-diagnosis   — view the doctor's final diagnosis
+
+Notes:
+  - The doctor's claim-visit endpoint (in app.routers.doctor) should call
+    _trigger_and_store_diagnosis(visit_id, db) after assigning the visit
+    so the AI suggestions are ready by the time the doctor opens the page.
+    See PATCH_NOTES.md for the exact one-line hook to add.
+"""
+import logging
+from datetime import datetime, timezone
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import delete, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import get_settings
+from app.database import get_db
+from app.dependencies.auth import require_role
+from app.exceptions import (
+    DiagnosisError,
+    DiagnosisServiceUnavailableError,
+    NotFoundError,
+)
+from app.models.diagnosis import AIDiagnosisSuggestion, FinalDiagnosis
+from app.schemas.diagnosis import (
+    AIDiagnosisResponse,
+    AIDiagnosisSuggestion as AIDiagnosisSuggestionSchema,
+    FinalDiagnosisRequest,
+    FinalDiagnosisResponse,
+)
+from app.services.diagnosis_client import trigger_visit_diagnosis
+
+logger = logging.getLogger(__name__)
+settings = get_settings()
+
+router = APIRouter(tags=["Diagnosis"])
+
+
+# =====================================================================
+# Helpers
+# =====================================================================
+
+async def _trigger_and_store_diagnosis(
+    visit_id: UUID,
+    db: AsyncSession,
+    patient_sex: str | None = None,
+    patient_age: int | None = None,
+    top_k: int | None = None,
+    reextract: bool = False,
+) -> AIDiagnosisResponse:
+    """Call ai-triage-service, wipe old suggestions, store new ones.
+
+    Used by:
+      - POST /visits/{id}/diagnose          (this router)
+      - The doctor's claim-visit endpoint   (imported from app.routers.doctor)
+
+    Raises DiagnosisServiceUnavailableError if ai-triage-service is down.
+    """
+    if not settings.AI_DIAGNOSIS_ENABLED:
+        raise DiagnosisServiceUnavailableError(
+            "AI diagnosis is disabled (AI_DIAGNOSIS_ENABLED=false)"
+        )
+
+    result = await trigger_visit_diagnosis(
+        visit_id=visit_id,
+        patient_sex=patient_sex,
+        patient_age=patient_age,
+        top_k=top_k,
+        reextract=reextract,
+    )
+    if result is None:
+        raise DiagnosisServiceUnavailableError(
+            "ai-triage-service is unreachable or returned an error"
+        )
+
+    # Wipe old suggestions for this visit (we always store the latest set)
+    await db.execute(
+        delete(AIDiagnosisSuggestion).where(
+            AIDiagnosisSuggestion.visit_id == visit_id
+        )
+    )
+
+    # Insert new ones (rank = 1-based position in predictions[])
+    rows = []
+    for idx, p in enumerate(result.predictions, start=1):
+        row = AIDiagnosisSuggestion(
+            visit_id=visit_id,
+            disease_id=p.disease_id,
+            disease_name_fa=p.disease_name_fa,
+            disease_name_en=p.disease_name_en,
+            icd10=p.icd10,
+            ml_probability=p.ml_probability,
+            rule_score=p.rule_score,
+            combined_score=p.combined_score,
+            is_emergency=p.is_emergency,
+            severity=p.severity,
+            rank=idx,
+            matched_evidences=[m.model_dump() for m in p.matched_evidences],
+            absent_evidences=[a.model_dump() for a in p.absent_evidences],
+        )
+        db.add(row)
+        rows.append(row)
+
+    await db.commit()
+    await db.refresh(row for row in rows)  # ensures id/created_at are populated
+
+    logger.info(
+        "Stored %d AI diagnosis suggestions for visit %s (source=%s)",
+        len(rows),
+        visit_id,
+        result.evidence_source,
+    )
+
+    return AIDiagnosisResponse(
+        visit_id=visit_id,
+        suggestions=[
+            AIDiagnosisSuggestionSchema(
+                id=str(row.id),
+                disease_id=row.disease_id,
+                disease_name_fa=row.disease_name_fa,
+                disease_name_en=row.disease_name_en,
+                icd10=row.icd10,
+                ml_probability=row.ml_probability,
+                rule_score=row.rule_score,
+                combined_score=row.combined_score,
+                is_emergency=row.is_emergency,
+                severity=row.severity,
+                matched_evidences=row.matched_evidences,
+                absent_evidences=row.absent_evidences,
+                rank=row.rank,
+            )
+            for row in rows
+        ],
+        evidence_source=result.evidence_source,
+        patient_sex=result.patient_sex,
+        model_version=result.model_version,
+        rule_engine_version=result.rule_engine_version,
+        diagnosed_at=datetime.now(timezone.utc),
+        input_evidence_count=result.input_evidence_count,
+    )
+
+
+# =====================================================================
+# Doctor endpoints
+# =====================================================================
+
+@router.post(
+    "/visits/{visit_id}/diagnose",
+    response_model=AIDiagnosisResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def trigger_diagnosis(
+    visit_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_role("doctor")),
+):
+    """(Re-)trigger AI diagnosis for a visit.
+
+    Calls ai-triage-service POST /visits/{visit_id}/diagnose, then wipes
+    and re-stores the suggestions for this visit. Returns the fresh set.
+
+    Auth: JWT with role=doctor.
+    """
+    logger.info(
+        "Doctor %s triggered AI diagnosis for visit %s",
+        current_user.get("sub"),
+        visit_id,
+    )
+    return await _trigger_and_store_diagnosis(visit_id, db)
+
+
+@router.get(
+    "/visits/{visit_id}/ai-diagnosis",
+    response_model=AIDiagnosisResponse,
+)
+async def get_ai_diagnosis(
+    visit_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_role("doctor")),
+):
+    """Fetch the stored AI diagnosis suggestions for a visit.
+
+    Returns 404 if no diagnosis has been triggered yet — the doctor should
+    POST /visits/{id}/diagnose first.
+
+    Auth: JWT with role=doctor.
+    """
+    rows = (
+        await db.execute(
+            select(AIDiagnosisSuggestion)
+            .where(AIDiagnosisSuggestion.visit_id == visit_id)
+            .order_by(AIDiagnosisSuggestion.rank)
+        )
+    ).scalars().all()
+
+    if not rows:
+        raise NotFoundError(
+            "No AI diagnosis suggestions stored for this visit. "
+            "POST /visits/{id}/diagnose to trigger one."
+        )
+
+    # Pull metadata from the first row (we don't store it separately — it
+    # would be redundant with the predictions themselves).
+    first = rows[0]
+    return AIDiagnosisResponse(
+        visit_id=visit_id,
+        suggestions=[
+            AIDiagnosisSuggestionSchema(
+                id=str(r.id),
+                disease_id=r.disease_id,
+                disease_name_fa=r.disease_name_fa,
+                disease_name_en=r.disease_name_en,
+                icd10=r.icd10,
+                ml_probability=r.ml_probability,
+                rule_score=r.rule_score,
+                combined_score=r.combined_score,
+                is_emergency=r.is_emergency,
+                severity=r.severity,
+                matched_evidences=r.matched_evidences,
+                absent_evidences=r.absent_evidences,
+                rank=r.rank,
+            )
+            for r in rows
+        ],
+        evidence_source="stored",
+        patient_sex="M",   # not stored per-row — caller knows from visit context
+        model_version="stored",
+        rule_engine_version="stored",
+        diagnosed_at=first.created_at,
+        input_evidence_count=0,
+    )
+
+
+@router.post(
+    "/visits/{visit_id}/final-diagnosis",
+    response_model=FinalDiagnosisResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def submit_final_diagnosis(
+    visit_id: UUID,
+    data: FinalDiagnosisRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_role("doctor")),
+):
+    """Submit the doctor's final diagnosis for a visit.
+
+    The doctor can either:
+      - pick one of the AI suggestions (selected_suggestion_id), or
+      - enter a manual diagnosis (manual_disease_name + manual_icd10).
+
+    At least one source must be provided. The visit's status is moved to
+    "completed" atomically with the diagnosis submission.
+
+    Auth: JWT with role=doctor. Only the doctor assigned to this visit
+    can submit (the doctor router enforces assignment before calling us).
+    """
+    # Validate that the doctor is assigned to this visit
+    # (We import lazily to avoid a circular import with app.routers.doctor.)
+    from app.routers.doctor import _assert_doctor_owns_visit  # type: ignore
+    await _assert_doctor_owns_visit(visit_id, current_user, db)
+
+    # Validate the request
+    if not data.selected_suggestion_id and not data.manual_disease_name:
+        raise DiagnosisError(
+            "Either selected_suggestion_id or manual_disease_name must be provided"
+        )
+
+    # Resolve the chosen disease details
+    selected_suggestion: AIDiagnosisSuggestion | None = None
+    if data.selected_suggestion_id:
+        selected_suggestion = (
+            await db.execute(
+                select(AIDiagnosisSuggestion).where(
+                    AIDiagnosisSuggestion.id == UUID(data.selected_suggestion_id),
+                    AIDiagnosisSuggestion.visit_id == visit_id,
+                )
+            )
+        ).scalars().first()
+        if not selected_suggestion:
+            raise NotFoundError(
+                f"AI suggestion {data.selected_suggestion_id} not found for visit {visit_id}"
+            )
+
+    # If both are provided, the manual entry wins (doctor override)
+    if data.manual_disease_name:
+        disease_name_fa = data.manual_disease_name
+        disease_name_en = None
+        icd10 = data.manual_icd10
+        disease_id = None
+        selected_suggestion_id = None
+    else:
+        assert selected_suggestion is not None
+        disease_name_fa = selected_suggestion.disease_name_fa
+        disease_name_en = selected_suggestion.disease_name_en
+        icd10 = selected_suggestion.icd10
+        disease_id = selected_suggestion.disease_id
+        selected_suggestion_id = selected_suggestion.id
+
+    # Idempotency: if there's already a final diagnosis for this visit,
+    # update it instead of erroring out (so the doctor can revise).
+    existing = (
+        await db.execute(
+            select(FinalDiagnosis).where(FinalDiagnosis.visit_id == visit_id)
+        )
+    ).scalars().first()
+
+    is_update = existing is not None
+    if existing:
+        existing.disease_name_fa = disease_name_fa
+        existing.disease_name_en = disease_name_en
+        existing.icd10 = icd10
+        existing.disease_id = disease_id
+        existing.selected_suggestion_id = selected_suggestion_id
+        existing.notes = data.notes
+        existing.requires_follow_up = data.requires_follow_up
+        existing.follow_up_days = data.follow_up_days
+        existing.doctor_id = UUID(str(current_user["sub"]))
+        existing.created_at = datetime.now(timezone.utc)
+        row = existing
+    else:
+        row = FinalDiagnosis(
+            visit_id=visit_id,
+            doctor_id=UUID(str(current_user["sub"])),
+            disease_name_fa=disease_name_fa,
+            disease_name_en=disease_name_en,
+            icd10=icd10,
+            disease_id=disease_id,
+            selected_suggestion_id=selected_suggestion_id,
+            notes=data.notes,
+            requires_follow_up=data.requires_follow_up,
+            follow_up_days=data.follow_up_days,
+        )
+        db.add(row)
+
+    # Move the visit status to "completed". If your project has a Visit ORM
+    # model, replace this raw SQL with a proper ORM update.
+    await db.execute(
+        text("UPDATE visits SET status = 'completed', completed_at = NOW() WHERE id = :vid"),
+        {"vid": visit_id},
+    )
+
+    await db.commit()
+    await db.refresh(row)
+
+    logger.info(
+        "Final diagnosis submitted for visit %s by doctor %s: disease=%s icd10=%s",
+        visit_id,
+        current_user.get("sub"),
+        disease_name_fa,
+        icd10,
+    )
+
+    # Override the response status code: 201 for new, 200 for update.
+    if is_update:
+        response.status_code = status.HTTP_200_OK
+
+    return FinalDiagnosisResponse(
+        id=str(row.id),
+        visit_id=row.visit_id,
+        disease_name_fa=row.disease_name_fa,
+        disease_name_en=row.disease_name_en,
+        icd10=row.icd10,
+        disease_id=row.disease_id,
+        selected_suggestion_id=str(row.selected_suggestion_id) if row.selected_suggestion_id else None,
+        notes=row.notes,
+        requires_follow_up=row.requires_follow_up,
+        follow_up_days=row.follow_up_days,
+        doctor_id=str(row.doctor_id),
+        created_at=row.created_at,
+        visit_status="completed",
+    )
+
+
+# =====================================================================
+# Patient + Doctor shared endpoint
+# =====================================================================
+
+@router.get(
+    "/visits/{visit_id}/final-diagnosis",
+    response_model=FinalDiagnosisResponse,
+)
+async def get_final_diagnosis(
+    visit_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_role("doctor", "patient")),
+):
+    """Fetch the final diagnosis for a visit.
+
+    Doctor: can view any time after submission.
+    Patient: can view only after the visit status is "completed" (the
+    submit endpoint moves it there atomically).
+
+    Auth: JWT with role=doctor OR role=patient.
+    """
+    row = (
+        await db.execute(
+            select(FinalDiagnosis).where(FinalDiagnosis.visit_id == visit_id)
+        )
+    ).scalars().first()
+
+    if not row:
+        raise NotFoundError("No final diagnosis submitted for this visit yet")
+
+    # Patients only see it once the visit is completed
+    visit_status = (
+        await db.execute(text("SELECT status FROM visits WHERE id = :vid"), {"vid": visit_id})
+    ).scalar_one_or_none() or "unknown"
+    if current_user.get("role") == "patient":
+        if visit_status != "completed":
+            raise NotFoundError(
+                "Final diagnosis is not yet available — visit is still in progress"
+            )
+
+    # Reuse the visit_status we just queried
+
+    return FinalDiagnosisResponse(
+        id=str(row.id),
+        visit_id=row.visit_id,
+        disease_name_fa=row.disease_name_fa,
+        disease_name_en=row.disease_name_en,
+        icd10=row.icd10,
+        disease_id=row.disease_id,
+        selected_suggestion_id=str(row.selected_suggestion_id) if row.selected_suggestion_id else None,
+        notes=row.notes,
+        requires_follow_up=row.requires_follow_up,
+        follow_up_days=row.follow_up_days,
+        doctor_id=str(row.doctor_id),
+        created_at=row.created_at,
+        visit_status=visit_status,
+    )
+
+──────────────────────────────────────────────────────────────────────────────
+[17/34] routers/doctor.py
+    157 lines · 5.3 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Doctor-facing consultation endpoints."""
+from typing import List
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import get_db
+from app.dependencies.auth import require_role
+from app.exceptions import (
+    VisitNotFoundError,
+    SuggestionNotFoundError,
+    ForbiddenAccessError,
+)
+from app.schemas.visit import VisitResponse, VisitListResponse
+from app.schemas.clinical import (
+    DiseaseSuggestionResponse,
+    SuggestionDecisionInput,
+    FinalPrescriptionCreate,
+    FinalPrescriptionResponse,
+)
+from app.schemas.internal import VisitContextResponse
+from app.services.visit_service import VisitService
+
+router = APIRouter(prefix="/doctor/visits", tags=["Doctor Consultation"])
+
+
+def get_user_id(current_user: dict) -> UUID:
+    return UUID(current_user["sub"])
+
+
+async def get_doctor_visit(
+    visit_id: UUID,
+    current_user: dict,
+    db: AsyncSession,
+):
+    """Fetch visit and enforce that it belongs to this doctor."""
+    service = VisitService(db)
+    visit = await service.get_visit(visit_id)
+    if not visit:
+        raise VisitNotFoundError()
+    if visit.doctor_id != get_user_id(current_user):
+        raise ForbiddenAccessError("Visit is not assigned to you")
+    return visit
+
+
+@router.get("/queue", response_model=VisitListResponse)
+async def get_queue(
+    current_user: dict = Depends(require_role("doctor")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Visits finished with AI processing and waiting for a doctor."""
+    service = VisitService(db)
+    visits = await service.list_queue()
+    return VisitListResponse(total=len(visits), visits=visits)
+
+
+@router.get("", response_model=VisitListResponse)
+async def list_my_visits(
+    current_user: dict = Depends(require_role("doctor")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Doctor's active visits."""
+    service = VisitService(db)
+    visits = await service.list_doctor_visits(get_user_id(current_user))
+    return VisitListResponse(total=len(visits), visits=visits)
+
+
+@router.post("/{visit_id}/claim", response_model=VisitResponse)
+async def claim_visit(
+    visit_id: UUID,
+    current_user: dict = Depends(require_role("doctor")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Claim a queued visit -> starts the doctor-patient chat."""
+    service = VisitService(db)
+    visit = await service.get_visit(visit_id)
+    if not visit:
+        raise VisitNotFoundError()
+    return await service.claim(visit, get_user_id(current_user))
+
+
+@router.get("/{visit_id}/context", response_model=VisitContextResponse)
+async def get_visit_context(
+    visit_id: UUID,
+    current_user: dict = Depends(require_role("doctor")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Full visit context: patient messages, symptoms, AI suggestions, drafts, chat."""
+    visit = await get_doctor_visit(visit_id, current_user, db)
+    return VisitContextResponse(
+        visit=visit,
+        messages=visit.messages,
+        symptoms=visit.symptoms,
+        disease_suggestions=visit.disease_suggestions,
+        prescription_drafts=visit.prescription_drafts,
+        chat_messages=visit.chat_messages,
+        final_prescription=visit.final_prescription,
+    )
+
+
+@router.put("/{visit_id}/suggestions/{suggestion_id}", response_model=DiseaseSuggestionResponse)
+async def decide_suggestion(
+    visit_id: UUID,
+    suggestion_id: UUID,
+    data: SuggestionDecisionInput,
+    current_user: dict = Depends(require_role("doctor")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Doctor accepts/rejects an AI disease suggestion."""
+    service = VisitService(db)
+    await get_doctor_visit(visit_id, current_user, db)
+    suggestion = await service.decide_suggestion(
+        visit_id, suggestion_id, data.decision, get_user_id(current_user)
+    )
+    if not suggestion:
+        raise SuggestionNotFoundError()
+    return suggestion
+
+
+@router.post("/{visit_id}/prescription", response_model=FinalPrescriptionResponse, status_code=status.HTTP_201_CREATED)
+async def issue_final_prescription(
+    visit_id: UUID,
+    data: FinalPrescriptionCreate,
+    current_user: dict = Depends(require_role("doctor")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Doctor issues the final prescription (edited version of the AI draft).
+    The visit is automatically marked as completed."""
+    service = VisitService(db)
+    await get_doctor_visit(visit_id, current_user, db)
+    return await service.issue_final_prescription(visit_id, get_user_id(current_user), data)
+
+
+@router.post("/{visit_id}/complete", response_model=VisitResponse)
+async def complete_visit(
+    visit_id: UUID,
+    current_user: dict = Depends(require_role("doctor")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually mark the visit completed (if prescription is handled elsewhere)."""
+    service = VisitService(db)
+    visit = await get_doctor_visit(visit_id, current_user, db)
+    return await service.transition(visit, "completed")
+
+
+@router.post("/{visit_id}/close", response_model=VisitResponse)
+async def close_visit(
+    visit_id: UUID,
+    current_user: dict = Depends(require_role("doctor")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Close a completed visit (archival step)."""
+    service = VisitService(db)
+    visit = await get_doctor_visit(visit_id, current_user, db)
+    return await service.transition(visit, "closed")
+
+──────────────────────────────────────────────────────────────────────────────
+[18/34] routers/internal.py
+    174 lines · 6.0 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Internal API endpoints for AI services and medical-record-service.
+
+NOT exposed through the Gateway (gateway blocks /internal/* paths).
+Called by:
+- Persian Medical Evidence Extractor (symptom detection)
+- AI diagnostic service (disease suggestions)
+- AI prescription service (prescription drafts)
+- medical-record-service (record sync hooks)
+All requests require the X-Internal-API-Key header.
+"""
+from typing import List
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import get_db
+from app.dependencies.auth import verify_internal_api_key
+from app.exceptions import VisitNotFoundError
+from app.models.visit import Visit
+from app.schemas.visit import VisitStatusUpdate, MedicalRecordLink, VisitResponse
+from app.schemas.clinical import (
+    SymptomResponse,
+    AISymptomsBulkInput,
+    DiseaseSuggestionResponse,
+    DiseaseSuggestionsBulkInput,
+    AIPrescriptionDraftInput,
+    AIPrescriptionDraftResponse,
+)
+from app.schemas.internal import VisitContextResponse
+from app.services.visit_service import VisitService
+from app.services.record_sync import sync_visit_to_record
+
+router = APIRouter(prefix="/internal/intake", tags=["Internal (AI + Records)"])
+
+
+async def get_visit_or_404(visit_id: UUID, db: AsyncSession):
+    service = VisitService(db)
+    visit = await service.get_visit(visit_id)
+    if not visit:
+        raise VisitNotFoundError()
+    return visit
+
+
+@router.get("/visits/{visit_id}/context", response_model=VisitContextResponse)
+async def get_visit_context(
+    visit_id: UUID,
+    _: bool = Depends(verify_internal_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Full visit data for AI processing (messages + symptoms + everything)."""
+    visit = await get_visit_or_404(visit_id, db)
+    return VisitContextResponse(
+        visit=visit,
+        messages=visit.messages,
+        symptoms=visit.symptoms,
+        disease_suggestions=visit.disease_suggestions,
+        prescription_drafts=visit.prescription_drafts,
+        chat_messages=visit.chat_messages,
+        final_prescription=visit.final_prescription,
+    )
+
+
+@router.post("/visits/{visit_id}/symptoms/ai", response_model=List[SymptomResponse], status_code=status.HTTP_201_CREATED)
+async def add_ai_symptoms(
+    visit_id: UUID,
+    payload: AISymptomsBulkInput,
+    _: bool = Depends(verify_internal_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Store AI-detected symptoms (duplicates are skipped)."""
+    service = VisitService(db)
+    await get_visit_or_404(visit_id, db)
+    return await service.bulk_add_ai_symptoms(visit_id, payload)
+
+
+@router.post("/visits/{visit_id}/disease-suggestions", response_model=List[DiseaseSuggestionResponse], status_code=status.HTTP_201_CREATED)
+async def submit_disease_suggestions(
+    visit_id: UUID,
+    payload: DiseaseSuggestionsBulkInput,
+    _: bool = Depends(verify_internal_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Store AI-suggested probable diseases for the doctor (replaces previous list)."""
+    service = VisitService(db)
+    await get_visit_or_404(visit_id, db)
+    return await service.replace_disease_suggestions(visit_id, payload)
+
+
+@router.post("/visits/{visit_id}/prescription-draft", response_model=AIPrescriptionDraftResponse, status_code=status.HTTP_201_CREATED)
+async def submit_prescription_draft(
+    visit_id: UUID,
+    payload: AIPrescriptionDraftInput,
+    _: bool = Depends(verify_internal_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Store the AI prescription draft for the doctor to edit."""
+    service = VisitService(db)
+    await get_visit_or_404(visit_id, db)
+    return await service.save_draft(visit_id, payload)
+
+
+@router.put("/visits/{visit_id}/status", response_model=VisitResponse)
+async def update_visit_status(
+    visit_id: UUID,
+    data: VisitStatusUpdate,
+    _: bool = Depends(verify_internal_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """AI pipeline updates the visit status, e.g. ai_processing -> doctor_assigned."""
+    service = VisitService(db)
+    visit = await get_visit_or_404(visit_id, db)
+    return await service.transition(visit, data.status)
+
+
+@router.put("/visits/{visit_id}/medical-record", response_model=VisitResponse)
+async def link_medical_record(
+    visit_id: UUID,
+    data: MedicalRecordLink,
+    _: bool = Depends(verify_internal_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Link the visit to a medical record and sync it to medical-record-service."""
+    service = VisitService(db)
+    visit = await get_visit_or_404(visit_id, db)
+    visit = await service.link_medical_record(visit, data.medical_record_id)
+
+    # ── sync hook: register the visit in the record's junction table ──
+    await sync_visit_to_record(
+        medical_record_id=data.medical_record_id,
+        visit_id=visit.id,
+        patient_id=visit.patient_id,
+    )
+
+    return visit
+
+
+# =====================================================================
+# medical-record-service hooks
+# =====================================================================
+
+@router.get("/records/{record_id}/visits", response_model=List[VisitResponse])
+async def list_record_visits(
+    record_id: UUID,
+    _: bool = Depends(verify_internal_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """All visits linked to a medical record (medical-record-service delegates here)."""
+    result = await db.execute(
+        select(Visit)
+        .where(Visit.medical_record_id == record_id)
+        .order_by(Visit.started_at.asc())
+    )
+    return result.scalars().all()
+
+
+@router.get("/doctor/{doctor_id}/patient-ids")
+async def list_doctor_patient_ids(
+    doctor_id: UUID,
+    _: bool = Depends(verify_internal_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Distinct patient IDs this doctor has at least one visit with.
+
+    Used by medical-record-service for the minimal doctor view.
+    """
+    result = await db.execute(
+        select(Visit.patient_id)
+        .where(Visit.doctor_id == doctor_id)
+        .distinct()
+    )
+    return {"patient_ids": [str(pid) for pid in result.scalars().all()]}
+
+──────────────────────────────────────────────────────────────────────────────
+[19/34] routers/patient.py
+    315 lines · 10.9 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Patient-facing visit intake endpoints."""
+from typing import List, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import get_db
+from app.dependencies.auth import get_current_user, require_role
+from app.exceptions import (
+    VisitNotFoundError,
+    SymptomNotFoundError,
+    PrescriptionNotFoundError,
+    ForbiddenAccessError,
+)
+from app.schemas.visit import (
+    VisitCreate,
+    VisitResponse,
+    VisitListResponse,
+    MessageCreate,
+    MessageResponse,
+)
+from app.schemas.clinical import (
+    SymptomCreate,
+    SymptomResponse,
+    DiseaseSuggestionResponse,
+    AIPrescriptionDraftResponse,
+    FinalPrescriptionResponse,
+)
+from app.schemas.nlp import EvidenceExtractionResponse
+from app.services.visit_service import VisitService
+from app.services.storage_service import StorageService
+from app.services.record_sync import sync_visit_to_record
+from app.services.evidence_extraction import run_extraction_for_visit
+
+router = APIRouter(prefix="/visits", tags=["Visit Intake"])
+
+
+def get_user_id(current_user: dict) -> UUID:
+    return UUID(current_user["sub"])
+
+
+async def get_owned_visit(
+    visit_id: UUID,
+    current_user: dict,
+    db: AsyncSession,
+):
+    """Fetch visit and enforce patient ownership."""
+    service = VisitService(db)
+    visit = await service.get_visit(visit_id)
+    if not visit:
+        raise VisitNotFoundError()
+    if visit.patient_id != get_user_id(current_user):
+        raise ForbiddenAccessError()
+    return visit
+
+
+def _hydrate_message(storage: StorageService, message) -> MessageResponse:
+    """Regenerate a fresh presigned URL for file attachments."""
+    data = MessageResponse.model_validate(message)
+    if message.attachment_key:
+        data.attachment_url = storage.get_file_url(message.attachment_key)
+    return data
+
+
+# =====================================================================
+# VISIT LIFECYCLE
+# =====================================================================
+
+@router.post("", response_model=VisitResponse, status_code=status.HTTP_201_CREATED)
+async def create_visit(
+    data: VisitCreate,
+    current_user: dict = Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Start a new visit. Optionally attach it to an existing medical record."""
+    service = VisitService(db)
+    patient_id = get_user_id(current_user)
+    visit = await service.create_visit(patient_id, data)
+
+    if visit.medical_record_id is not None:
+        await sync_visit_to_record(
+            medical_record_id=visit.medical_record_id,
+            visit_id=visit.id,
+            patient_id=patient_id,
+            added_by=patient_id,
+        )
+
+    return visit
+
+
+@router.get("", response_model=VisitListResponse)
+async def list_my_visits(
+    current_user: dict = Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all of the patient's visits (across all medical records)."""
+    service = VisitService(db)
+    visits = await service.list_patient_visits(get_user_id(current_user))
+    return VisitListResponse(total=len(visits), visits=visits)
+
+
+@router.get("/{visit_id}", response_model=VisitResponse)
+async def get_visit(
+    visit_id: UUID,
+    current_user: dict = Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get one of the patient's visits."""
+    visit = await get_owned_visit(visit_id, current_user, db)
+    return visit
+
+
+@router.post("/{visit_id}/submit", response_model=VisitResponse)
+async def submit_visit(
+    visit_id: UUID,
+    current_user: dict = Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Patient finished describing symptoms -> hand the visit over to the AI service.
+
+    Before the status flips to ai_processing, the visit's Persian intake text
+    is sent to ai-nlp-service (POST /extract) and the detected evidences are
+    stored as AI symptoms. The call is fail-safe: if the NLP service is down,
+    submission continues without AI symptoms and extraction can be re-run
+    later via POST /visits/{visit_id}/extract-evidences.
+    """
+    service = VisitService(db)
+    visit = await get_owned_visit(visit_id, current_user, db)
+
+    # ── AI hook: Persian intake text -> ai-nlp-service -> AI symptom rows ──
+    await run_extraction_for_visit(visit_id, db, fail_safe=True)
+
+    return await service.transition(visit, "ai_processing")
+
+
+@router.post("/{visit_id}/cancel", response_model=VisitResponse)
+async def cancel_visit(
+    visit_id: UUID,
+    current_user: dict = Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Cancel the visit (only possible before/during early stages)."""
+    service = VisitService(db)
+    visit = await get_owned_visit(visit_id, current_user, db)
+    return await service.transition(visit, "cancelled")
+
+
+# =====================================================================
+# INTAKE MESSAGES
+# =====================================================================
+
+@router.post("/{visit_id}/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
+async def send_text_message(
+    visit_id: UUID,
+    data: MessageCreate,
+    current_user: dict = Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a text message during intake."""
+    service = VisitService(db)
+    await get_owned_visit(visit_id, current_user, db)
+    return await service.add_message(visit_id, content=data.content)
+
+
+@router.post("/{visit_id}/messages/attachment", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
+async def send_attachment(
+    visit_id: UUID,
+    file: UploadFile = File(...),
+    caption: Optional[str] = Form(None),
+    current_user: dict = Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a file (image/PDF/audio/video) during intake, with optional caption."""
+    service = VisitService(db)
+    await get_owned_visit(visit_id, current_user, db)
+
+    storage = StorageService()
+    attachment = await storage.upload_attachment(file, str(visit_id))
+    return await service.add_message(
+        visit_id,
+        content=caption,
+        message_type="file",
+        attachment=attachment,
+    )
+
+
+@router.get("/{visit_id}/messages", response_model=List[MessageResponse])
+async def list_messages(
+    visit_id: UUID,
+    current_user: dict = Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all intake messages of the visit (attachment URLs are fresh presigned URLs)."""
+    service = VisitService(db)
+    await get_owned_visit(visit_id, current_user, db)
+    messages = await service.list_messages(visit_id)
+    storage = StorageService()
+    return [_hydrate_message(storage, m) for m in messages]
+
+
+# =====================================================================
+# MANUAL SYMPTOMS
+# =====================================================================
+
+@router.post("/{visit_id}/symptoms", response_model=SymptomResponse, status_code=status.HTTP_201_CREATED)
+async def add_symptom(
+    visit_id: UUID,
+    data: SymptomCreate,
+    current_user: dict = Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Patient manually selects a symptom."""
+    service = VisitService(db)
+    await get_owned_visit(visit_id, current_user, db)
+    return await service.add_symptom(visit_id, data, source="manual")
+
+
+@router.get("/{visit_id}/symptoms", response_model=List[SymptomResponse])
+async def list_symptoms(
+    visit_id: UUID,
+    current_user: dict = Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all symptoms of the visit (manual + AI-detected)."""
+    service = VisitService(db)
+    await get_owned_visit(visit_id, current_user, db)
+    return await service.list_symptoms(visit_id)
+
+
+@router.delete("/{visit_id}/symptoms/{symptom_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_symptom(
+    visit_id: UUID,
+    symptom_id: UUID,
+    current_user: dict = Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a manually-added symptom."""
+    service = VisitService(db)
+    await get_owned_visit(visit_id, current_user, db)
+    deleted = await service.delete_symptom(visit_id, symptom_id)
+    if not deleted:
+        raise SymptomNotFoundError()
+    return None
+
+
+# =====================================================================
+# AI EVIDENCE EXTRACTION (ai-nlp-service)
+# =====================================================================
+
+@router.post("/{visit_id}/extract-evidences", response_model=EvidenceExtractionResponse)
+async def extract_evidences(
+    visit_id: UUID,
+    current_user: dict = Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send the visit's Persian intake text to ai-nlp-service and get the output.
+
+    The patient's intake messages are aggregated and posted to the NLP
+    service; the detected evidences are returned in the response AND stored
+    as AI symptoms (source="ai", duplicates skipped).
+
+    Unlike the submit hook, failures are NOT swallowed here: a disabled
+    integration or an unreachable ai-nlp-service raises 502 so the caller
+    gets explicit feedback.
+    """
+    await get_owned_visit(visit_id, current_user, db)
+    return await run_extraction_for_visit(visit_id, db, fail_safe=False)
+
+
+# =====================================================================
+# READ-ONLY RESULTS (patient view)
+# =====================================================================
+
+@router.get("/{visit_id}/disease-suggestions", response_model=List[DiseaseSuggestionResponse])
+async def list_disease_suggestions(
+    visit_id: UUID,
+    current_user: dict = Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    """AI-suggested probable diseases for this visit."""
+    service = VisitService(db)
+    await get_owned_visit(visit_id, current_user, db)
+    return await service.list_disease_suggestions(visit_id)
+
+
+@router.get("/{visit_id}/prescription-draft", response_model=AIPrescriptionDraftResponse)
+async def get_latest_prescription_draft(
+    visit_id: UUID,
+    current_user: dict = Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Latest AI prescription draft (doctor will edit it before issuing)."""
+    service = VisitService(db)
+    await get_owned_visit(visit_id, current_user, db)
+    draft = await service.get_latest_draft(visit_id)
+    if not draft:
+        raise PrescriptionNotFoundError()
+    return draft
+
+
+@router.get("/{visit_id}/prescription", response_model=FinalPrescriptionResponse)
+async def get_final_prescription(
+    visit_id: UUID,
+    current_user: dict = Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    """The final prescription issued by the doctor."""
+    service = VisitService(db)
+    await get_owned_visit(visit_id, current_user, db)
+    prescription = await service.get_final_prescription(visit_id)
+    if not prescription:
+        raise PrescriptionNotFoundError()
+    return prescription
+
+──────────────────────────────────────────────────────────────────────────────
+[20/34] routers/preview.py
+    50 lines · 2.0 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Preview endpoint for direct evidence extraction without a visit.
+
+This router exposes POST /extract-evidences-preview so the frontend chat
+can hit the ParsBERT model on free text BEFORE a visit is created. The
+visit-id-based endpoint POST /visits/{visit_id}/extract-evidences stays
+available for the regular visit-intake flow.
+
+Auth: requires an authenticated patient (the same role that owns the chat).
+No persistence happens here — the evidences are returned to the caller only.
+"""
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import get_db
+from app.dependencies.auth import require_role
+from app.exceptions import NLPServiceUnavailableError
+from app.schemas.nlp import ExtractPreviewRequest, EvidenceExtractionResponse
+from app.services.nlp_client import extract_evidences
+
+router = APIRouter(tags=["Preview"])
+
+
+@router.post("/extract-evidences-preview", response_model=EvidenceExtractionResponse)
+async def extract_evidences_preview(
+    data: ExtractPreviewRequest,
+    current_user: dict = Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Preview evidence extraction from free text without creating a visit.
+
+    Calls ai-nlp-service POST /extract with the patient's raw text and
+    returns the detected evidences. Nothing is stored in visits_db.
+    """
+    result = await extract_evidences(data.text)
+    if result is None:
+        # ai-nlp-service disabled / unreachable / non-200 — surface a 502
+        # so the frontend can show an explicit error instead of a silent
+        # fallback to fake symptoms.
+        raise NLPServiceUnavailableError()
+
+    return EvidenceExtractionResponse(
+        visit_id=None,                # preview has no visit
+        text_chars=len(data.text),
+        detected=result.detected,
+        stored_count=0,               # nothing persisted
+        duplicate_count=0,
+        model_version=result.model_version,
+        inference_time_ms=result.inference_time_ms,
+    )
+
+──────────────────────────────────────────────────────────────────────────────
+[21/34] schemas/__init__.py
+    36 lines · 925 B
+──────────────────────────────────────────────────────────────────────────────
+"""Pydantic schemas package."""
+from app.schemas.visit import (
+    VisitCreate,
+    VisitStatusUpdate,
+    MedicalRecordLink,
+    VisitResponse,
+    VisitListResponse,
+    MessageCreate,
+    MessageResponse,
+)
+from app.schemas.clinical import (
+    SymptomCreate,
+    SymptomResponse,
+    AISymptomInput,
+    AISymptomsBulkInput,
+    DiseaseSuggestionInput,
+    DiseaseSuggestionsBulkInput,
+    DiseaseSuggestionResponse,
+    SuggestionDecisionInput,
+    PrescriptionItemInput,
+    AIPrescriptionDraftInput,
+    AIPrescriptionDraftResponse,
+    FinalPrescriptionCreate,
+    PrescriptionItemResponse,
+    FinalPrescriptionResponse,
+)
+from app.schemas.chat import ChatMessageCreate, ChatMessageResponse
+from app.schemas.internal import VisitContextResponse
+from app.schemas.nlp import (
+    DetectedEvidence,
+    ExtractResult,
+    EvidenceExtractionResponse,
+)
+
+__all__ = [name for name in dir() if not name.startswith("_")]
+
+──────────────────────────────────────────────────────────────────────────────
+[22/34] schemas/chat.py
+    21 lines · 459 B
+──────────────────────────────────────────────────────────────────────────────
+"""Pydantic schemas for doctor-patient chat."""
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ChatMessageCreate(BaseModel):
+    content: str = Field(..., min_length=1)
+
+
+class ChatMessageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    visit_id: UUID
+    sender_id: UUID
+    sender_role: str   # doctor | patient
+    content: str
+    sent_at: datetime
+
+──────────────────────────────────────────────────────────────────────────────
+[23/34] schemas/clinical.py
+    167 lines · 4.9 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Pydantic schemas for symptoms, AI suggestions and prescriptions."""
+from datetime import datetime
+from typing import List, Literal, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+# ============ Symptom Schemas ============
+
+class SymptomCreate(BaseModel):
+    """Manually selected by the patient."""
+    symptom_name: str = Field(..., min_length=1, max_length=150)
+    severity: Optional[Literal["mild", "moderate", "severe"]] = None
+    body_part: Optional[str] = Field(None, max_length=100)
+    onset_at: Optional[datetime] = None
+    duration_description: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = None
+
+    @field_validator("symptom_name")
+    @classmethod
+    def strip_name(cls, v: str) -> str:
+        return v.strip()
+
+
+class SymptomResponse(SymptomCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    visit_id: UUID
+    source: str                      # manual | ai
+    confidence: Optional[float] = None
+    ai_model_version: Optional[str] = None
+    doctor_confirmed: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class AISymptomInput(BaseModel):
+    """Detected by the AI symptom-extraction service."""
+    symptom_name: str = Field(..., min_length=1, max_length=150)
+    severity: Optional[Literal["mild", "moderate", "severe"]] = None
+    body_part: Optional[str] = Field(None, max_length=100)
+    onset_at: Optional[datetime] = None
+    duration_description: Optional[str] = Field(None, max_length=100)
+    confidence: Optional[float] = Field(None, ge=0, le=1)
+    notes: Optional[str] = None
+
+    @field_validator("symptom_name")
+    @classmethod
+    def strip_name(cls, v: str) -> str:
+        return v.strip()
+
+
+class AISymptomsBulkInput(BaseModel):
+    symptoms: List[AISymptomInput]
+    model_version: Optional[str] = Field(None, max_length=50)
+
+
+# ============ AI Disease Suggestion Schemas ============
+
+class DiseaseSuggestionInput(BaseModel):
+    disease_name: str = Field(..., min_length=1, max_length=150)
+    icd10_code: Optional[str] = Field(None, max_length=10)
+    probability: float = Field(..., ge=0, le=1)
+    rank: int = Field(0, ge=0)
+    rationale: Optional[str] = None
+
+    @field_validator("disease_name")
+    @classmethod
+    def strip_name(cls, v: str) -> str:
+        return v.strip()
+
+
+class DiseaseSuggestionsBulkInput(BaseModel):
+    suggestions: List[DiseaseSuggestionInput]
+    model_version: Optional[str] = Field(None, max_length=50)
+
+
+class DiseaseSuggestionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    visit_id: UUID
+    disease_name: str
+    icd10_code: Optional[str] = None
+    probability: float
+    rank: int
+    rationale: Optional[str] = None
+    model_version: Optional[str] = None
+    doctor_decision: str           # pending | accepted | rejected
+    decided_by: Optional[UUID] = None
+    decided_at: Optional[datetime] = None
+    created_at: datetime
+
+
+class SuggestionDecisionInput(BaseModel):
+    decision: Literal["accepted", "rejected"]
+
+
+# ============ Prescription Schemas ============
+
+class PrescriptionItemInput(BaseModel):
+    drug_name: str = Field(..., min_length=1, max_length=150)
+    dosage: Optional[str] = Field(None, max_length=50)
+    frequency: Optional[str] = Field(None, max_length=50)
+    duration_days: Optional[int] = Field(None, ge=1, le=365)
+    quantity: Optional[str] = Field(None, max_length=50)
+    instructions: Optional[str] = None
+
+    @field_validator("drug_name")
+    @classmethod
+    def strip_name(cls, v: str) -> str:
+        return v.strip()
+
+
+class AIPrescriptionDraftInput(BaseModel):
+    items: List[PrescriptionItemInput] = Field(..., min_length=1)
+    ai_notes: Optional[str] = None
+    model_version: Optional[str] = Field(None, max_length=50)
+
+
+class AIPrescriptionDraftResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    visit_id: UUID
+    items: List[dict] = []
+    ai_notes: Optional[str] = None
+    model_version: Optional[str] = None
+    status: str                    # draft | superseded
+    created_at: datetime
+    updated_at: datetime
+
+
+class FinalPrescriptionCreate(BaseModel):
+    diagnosis_text: Optional[str] = None
+    notes: Optional[str] = None
+    items: List[PrescriptionItemInput] = []
+
+
+class PrescriptionItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    prescription_id: UUID
+    drug_name: str
+    dosage: Optional[str] = None
+    frequency: Optional[str] = None
+    duration_days: Optional[int] = None
+    quantity: Optional[str] = None
+    instructions: Optional[str] = None
+    sort_order: int
+
+
+class FinalPrescriptionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    visit_id: UUID
+    doctor_id: UUID
+    diagnosis_text: Optional[str] = None
+    notes: Optional[str] = None
+    issued_at: datetime
+    created_at: datetime
+    items: List[PrescriptionItemResponse] = []
+
+──────────────────────────────────────────────────────────────────────────────
+[24/34] schemas/diagnosis.py
+    158 lines · 5.3 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Diagnosis schemas — visit-intake-service side.
+
+These mirror what ai-triage-service returns from POST /visits/{id}/diagnose
+plus the persistence layer (id, visit_id, created_at) we add when storing
+the predictions in visits_db.
+
+Also defines FinalDiagnosisRequest / FinalDiagnosisResponse — the doctor's
+final decision (chosen disease + ICD-10 + notes), submitted when the
+visit is closed.
+"""
+from datetime import datetime
+from typing import List, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Mirror of ai-triage-service diagnosis schemas (tolerant client view)
+# ──────────────────────────────────────────────────────────────────────
+
+class MatchedEvidence(BaseModel):
+    """One evidence that contributed to a disease's rule-based score."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    evidence_id: str
+    weight: float
+    evidence_class: str   # cardinal | major | minor
+    name_fa: Optional[str] = None
+
+
+class DiseasePrediction(BaseModel):
+    """One predicted disease with probability and metadata."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    disease_id: str
+    disease_name_fa: str
+    disease_name_en: str
+    icd10: Optional[str] = None
+    ml_probability: float
+    rule_score: float
+    combined_score: float
+    is_emergency: bool = False
+    severity: int = 1
+    matched_evidences: List[MatchedEvidence] = []
+    absent_evidences: List[MatchedEvidence] = []
+
+
+class DiagnosisTriggerRequest(BaseModel):
+    """Body of POST /visits/{visit_id}/diagnose (doctor triggers AI diagnosis).
+
+    All fields optional — by default ai-triage-service:
+      1. Fetches visit context (this same service)
+      2. Resolves evidence_ids from stored AI symptoms
+      3. Falls back to re-extracting from patient text
+      4. Resolves patient_sex from visit context
+    """
+
+    patient_sex: Optional[str] = Field(
+        default=None,
+        pattern="^(M|F|m|f)$",
+        description="Override patient sex. If omitted, fetched from visit context.",
+    )
+    patient_age: Optional[int] = Field(default=None, ge=0, le=150)
+    top_k: Optional[int] = Field(default=None, ge=1, le=50)
+    reextract: bool = Field(
+        default=False,
+        description="If true, re-run ParsBERT on patient text instead of using stored AI symptoms.",
+    )
+
+
+class AIDiagnosisSuggestion(BaseModel):
+    """One stored AI diagnosis suggestion (a single disease prediction)."""
+
+    id: str                              # UUID of the row in ai_diagnosis_suggestions
+    disease_id: str
+    disease_name_fa: str
+    disease_name_en: str
+    icd10: Optional[str] = None
+    ml_probability: float
+    rule_score: float
+    combined_score: float
+    is_emergency: bool = False
+    severity: int = 1
+    matched_evidences: List[MatchedEvidence] = []
+    absent_evidences: List[MatchedEvidence] = []
+    rank: int                            # 1-based rank in the suggestions list
+
+
+class AIDiagnosisResponse(BaseModel):
+    """Response of GET /visits/{visit_id}/ai-diagnosis and POST /visits/{id}/diagnose."""
+
+    visit_id: UUID
+    suggestions: List[AIDiagnosisSuggestion]
+    evidence_source: str                 # stored_ai_symptoms | reextracted
+    patient_sex: str
+    model_version: str
+    rule_engine_version: str
+    diagnosed_at: datetime
+    input_evidence_count: int
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Final diagnosis (doctor's decision)
+# ──────────────────────────────────────────────────────────────────────
+
+class FinalDiagnosisRequest(BaseModel):
+    """Body of POST /visits/{visit_id}/final-diagnosis.
+
+    The doctor can either:
+      - pick one of the AI suggestions (selected_suggestion_id)
+      - enter a manual diagnosis (manual_disease_name + manual_icd10)
+    At least one of the two must be provided. Notes are free-text (Persian).
+    """
+
+    selected_suggestion_id: Optional[str] = Field(
+        default=None,
+        description="ID of the AI suggestion the doctor accepts. Mutually exclusive with manual_*.",
+    )
+    manual_disease_name: Optional[str] = Field(
+        default=None,
+        max_length=300,
+        description="Free-text disease name (used when the doctor overrides the AI suggestions).",
+    )
+    manual_icd10: Optional[str] = Field(
+        default=None,
+        max_length=20,
+        description="ICD-10 code for the manual diagnosis (e.g. J03.9).",
+    )
+    notes: str = Field(
+        default="",
+        max_length=4000,
+        description="Doctor's free-text explanation / prescription summary (Persian).",
+    )
+    requires_follow_up: bool = False
+    follow_up_days: Optional[int] = Field(default=None, ge=1, le=365)
+
+
+class FinalDiagnosisResponse(BaseModel):
+    """Response of POST /visits/{visit_id}/final-diagnosis and
+    GET /visits/{visit_id}/final-diagnosis (patient view)."""
+
+    id: str
+    visit_id: UUID
+    disease_name_fa: str
+    disease_name_en: Optional[str] = None
+    icd10: Optional[str] = None
+    disease_id: Optional[str] = None      # null for manual entries
+    selected_suggestion_id: Optional[str] = None
+    notes: str
+    requires_follow_up: bool
+    follow_up_days: Optional[int] = None
+    doctor_id: str
+    created_at: datetime
+    visit_status: str                     # reflects the new visit status after submission
+
+──────────────────────────────────────────────────────────────────────────────
+[25/34] schemas/internal.py
+    25 lines · 838 B
+──────────────────────────────────────────────────────────────────────────────
+"""Full visit context — used by AI services and doctors."""
+from typing import List, Optional
+
+from pydantic import BaseModel
+
+from app.schemas.visit import VisitResponse, MessageResponse
+from app.schemas.clinical import (
+    SymptomResponse,
+    DiseaseSuggestionResponse,
+    AIPrescriptionDraftResponse,
+    FinalPrescriptionResponse,
+)
+from app.schemas.chat import ChatMessageResponse
+
+
+class VisitContextResponse(BaseModel):
+    """Everything known about a visit in one payload."""
+    visit: VisitResponse
+    messages: List[MessageResponse] = []
+    symptoms: List[SymptomResponse] = []
+    disease_suggestions: List[DiseaseSuggestionResponse] = []
+    prescription_drafts: List[AIPrescriptionDraftResponse] = []
+    chat_messages: List[ChatMessageResponse] = []
+    final_prescription: Optional[FinalPrescriptionResponse] = None
+
+──────────────────────────────────────────────────────────────────────────────
+[26/34] schemas/nlp.py
+    68 lines · 2.1 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Pydantic schemas mirroring the ai-nlp-service POST /extract contract.
+
+These are the *client-side* views of the NLP response: tolerant on purpose
+(extra fields ignored, optional fields default to None) so a small change on
+the ai-nlp-service side can never break visit intake.
+"""
+from typing import List, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class DetectedEvidence(BaseModel):
+    """One evidence detected by ai-nlp-service (trimmed client-side view)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    evidence_id: str
+    name: str
+    name_fa: Optional[str] = None
+    question_en: Optional[str] = None
+    question_fa: Optional[str] = None
+    data_type: Optional[str] = None
+    is_antecedent: Optional[bool] = None
+    code_question: Optional[str] = None
+    confidence: float = 0.0
+
+
+class ExtractResult(BaseModel):
+    """Trimmed-down mirror of ai-nlp-service's ExtractResponse."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    detected: List[DetectedEvidence] = []
+    threshold: Optional[float] = None
+    truncated: Optional[bool] = None
+    model_version: Optional[str] = None
+    inference_time_ms: Optional[float] = None
+
+
+class ExtractPreviewRequest(BaseModel):
+    """Body of POST /extract-evidences-preview.
+
+    Allows the frontend chat to ask ai-nlp-service for evidence detection on
+    free text WITHOUT creating a visit first. Threshold is optional and falls
+    back to the service default (0.3) when omitted.
+    """
+
+    text: str = Field(..., min_length=1, max_length=5000)
+    threshold: Optional[float] = Field(default=None, gt=0.0, le=1.0)
+
+
+class EvidenceExtractionResponse(BaseModel):
+    """Response of POST /visits/{visit_id}/extract-evidences
+    AND POST /extract-evidences-preview.
+
+    visit_id is Optional on purpose: the preview endpoint has no visit, so it
+    returns None there. The visit-scoped endpoint keeps the real UUID.
+    """
+
+    visit_id: Optional[UUID] = None
+    text_chars: int
+    detected: List[DetectedEvidence]
+    stored_count: int
+    duplicate_count: int
+    model_version: Optional[str] = None
+    inference_time_ms: Optional[float] = None
+
+──────────────────────────────────────────────────────────────────────────────
+[27/34] schemas/visit.py
+    74 lines · 2.0 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Pydantic schemas for visits and intake messages."""
+from datetime import datetime
+from typing import List, Literal, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+# ============ Visit Schemas ============
+
+class VisitCreate(BaseModel):
+    """Patient starts a new visit (optionally on an existing medical record)."""
+    medical_record_id: Optional[UUID] = None
+    chief_complaint: Optional[str] = Field(None, max_length=2000)
+    patient_notes: Optional[str] = None
+    priority: Literal["low", "normal", "high", "emergency"] = "normal"
+
+
+class VisitStatusUpdate(BaseModel):
+    status: Literal[
+        "ai_processing", "doctor_assigned", "in_chat",
+        "prescription_pending", "completed", "closed", "cancelled",
+    ]
+
+
+class MedicalRecordLink(BaseModel):
+    """Used by the medical-record service (later) to link a visit to a record."""
+    medical_record_id: UUID
+
+
+class VisitResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    patient_id: UUID
+    medical_record_id: Optional[UUID] = None
+    doctor_id: Optional[UUID] = None
+    status: str
+    chief_complaint: Optional[str] = None
+    patient_notes: Optional[str] = None
+    priority: Optional[str] = None
+    started_at: datetime
+    doctor_joined_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class VisitListResponse(BaseModel):
+    total: int
+    visits: List[VisitResponse]
+
+
+# ============ Intake Message Schemas ============
+
+class MessageCreate(BaseModel):
+    content: str = Field(..., min_length=1)
+
+
+class MessageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    visit_id: UUID
+    sender_type: str
+    message_type: str
+    content: Optional[str] = None
+    attachment_name: Optional[str] = None
+    attachment_content_type: Optional[str] = None
+    attachment_size: Optional[int] = None
+    attachment_url: Optional[str] = None
+    sequence: int
+    sent_at: datetime
+
+──────────────────────────────────────────────────────────────────────────────
+[28/34] services/__init__.py
+    1 lines · 0 B
+──────────────────────────────────────────────────────────────────────────────
+
+
+──────────────────────────────────────────────────────────────────────────────
+[29/34] services/diagnosis_client.py
+    179 lines · 6.1 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Async client for ai-triage-service diagnosis endpoints.
+
+Two public functions:
+  - trigger_visit_diagnosis(visit_id, ...) → calls POST /visits/{id}/diagnose
+  - diagnose(evidence_ids, patient_sex, ...) → calls POST /diagnose (lightweight)
+
+Both return Pydantic models (or None on failure) so callers can decide
+whether to fail loud or soft.
+
+ai-triage-service handles all the heavy lifting (fetching visit context,
+resolving evidences, calling ai-diagnosis-service). visit-intake-service
+just passes the visit_id and gets back the predictions.
+"""
+import logging
+from typing import List, Optional
+from uuid import UUID
+
+import httpx
+from pydantic import BaseModel
+
+from app.config import get_settings
+from app.schemas.diagnosis import (
+    AIDiagnosisResponse,
+    DiseasePrediction,
+    MatchedEvidence,
+)
+
+logger = logging.getLogger(__name__)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Mirror of ai-triage-service VisitDiagnosisResponse (tolerant client view)
+# ──────────────────────────────────────────────────────────────────────
+
+class _VisitDiagnosisResponse(BaseModel):
+    """Mirror of ai-triage-service VisitDiagnosisResponse.
+
+    We define a private local mirror so a small schema drift on
+    ai-triage-service doesn't break this client — extra="ignore".
+    """
+
+    model_config = {"extra": "ignore"}
+
+    visit_id: str
+    predictions: List[DiseasePrediction] = []
+    input_evidence_count: int = 0
+    patient_sex: str = "M"
+    evidence_source: str = "stored_ai_symptoms"
+    model_version: str = "unknown"
+    inference_time_ms: float = 0.0
+    rule_engine_version: str = "unknown"
+    diagnosed_at: str = ""
+
+
+def _internal_headers() -> dict:
+    h = {}
+    settings = get_settings()
+    if settings.INTERNAL_API_KEY:
+        h["X-Internal-API-Key"] = settings.INTERNAL_API_KEY
+    return h
+
+
+async def trigger_visit_diagnosis(
+    visit_id: UUID,
+    patient_sex: Optional[str] = None,
+    patient_age: Optional[int] = None,
+    top_k: Optional[int] = None,
+    reextract: bool = False,
+) -> Optional[_VisitDiagnosisResponse]:
+    """Call ai-triage-service POST /visits/{visit_id}/diagnose.
+
+    Returns None on any failure (network, non-200, malformed payload).
+    The caller decides whether None is fatal (raises 502) or recoverable.
+    """
+    settings = get_settings()
+    if not settings.AI_TRIAGE_ENABLED:
+        logger.info("AI_TRIAGE_ENABLED is false — skipping diagnosis")
+        return None
+    if not settings.AI_TRIAGE_SERVICE_URL:
+        logger.warning("AI_TRIAGE_SERVICE_URL is not set — skipping diagnosis")
+        return None
+
+    payload: dict = {"reextract": reextract}
+    if patient_sex is not None:
+        payload["patient_sex"] = patient_sex
+    if patient_age is not None:
+        payload["patient_age"] = patient_age
+    if top_k is not None:
+        payload["top_k"] = top_k
+    else:
+        payload["top_k"] = settings.AI_DIAGNOSIS_TOP_K
+
+    url = (
+        f"{settings.AI_TRIAGE_SERVICE_URL.rstrip('/')}"
+        f"/visits/{visit_id}/diagnose"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=settings.AI_DIAGNOSIS_TIMEOUT_SECONDS) as client:
+            resp = await client.post(url, json=payload, headers=_internal_headers())
+    except httpx.HTTPError as exc:
+        logger.warning("ai-triage-service diagnose call failed (%s): %s", url, exc)
+        return None
+
+    if resp.status_code != 200:
+        logger.warning(
+            "ai-triage-service diagnose returned HTTP %s: %s",
+            resp.status_code,
+            resp.text[:500],
+        )
+        return None
+
+    try:
+        return _VisitDiagnosisResponse.model_validate(resp.json())
+    except ValueError as exc:
+        logger.warning("ai-triage-service diagnose returned an unexpected payload: %s", exc)
+        return None
+
+
+async def diagnose(
+    evidence_ids: List[str],
+    patient_sex: Optional[str] = None,
+    patient_age: Optional[int] = None,
+    top_k: Optional[int] = None,
+) -> Optional[_VisitDiagnosisResponse]:
+    """Call ai-triage-service POST /diagnose (lightweight passthrough).
+
+    Use this only when you already have evidence_ids in hand and don't want
+    the visit-context orchestration. The visit-scoped endpoint
+    (trigger_visit_diagnosis) is preferred for the doctor-claim flow.
+    """
+    settings = get_settings()
+    if not settings.AI_TRIAGE_ENABLED or not settings.AI_TRIAGE_SERVICE_URL:
+        return None
+
+    payload: dict = {"evidence_ids": evidence_ids}
+    if patient_sex is not None:
+        payload["patient_sex"] = patient_sex
+    if patient_age is not None:
+        payload["patient_age"] = patient_age
+    if top_k is not None:
+        payload["top_k"] = top_k
+    else:
+        payload["top_k"] = settings.AI_DIAGNOSIS_TOP_K
+
+    url = f"{settings.AI_TRIAGE_SERVICE_URL.rstrip('/')}/diagnose"
+    try:
+        async with httpx.AsyncClient(timeout=settings.AI_DIAGNOSIS_TIMEOUT_SECONDS) as client:
+            resp = await client.post(url, json=payload, headers=_internal_headers())
+    except httpx.HTTPError as exc:
+        logger.warning("ai-triage-service /diagnose call failed (%s): %s", url, exc)
+        return None
+
+    if resp.status_code != 200:
+        logger.warning(
+            "ai-triage-service /diagnose returned HTTP %s: %s",
+            resp.status_code,
+            resp.text[:500],
+        )
+        return None
+
+    try:
+        # POST /diagnose returns DiagnosisResponse (no visit_id / evidence_source).
+        # Wrap it in our local mirror shape so callers have a uniform interface.
+        body = resp.json()
+        return _VisitDiagnosisResponse(
+            visit_id="",
+            predictions=body.get("predictions", []),
+            input_evidence_count=body.get("input_evidence_count", 0),
+            patient_sex=body.get("patient_sex", "M"),
+            evidence_source="passthrough",
+            model_version=body.get("model_version", "unknown"),
+            inference_time_ms=body.get("inference_time_ms", 0.0),
+            rule_engine_version=body.get("rule_engine_version", "unknown"),
+            diagnosed_at="",
+        )
+    except ValueError as exc:
+        logger.warning("ai-triage-service /diagnose returned an unexpected payload: %s", exc)
+        return None
+
+──────────────────────────────────────────────────────────────────────────────
+[30/34] services/evidence_extraction.py
+    152 lines · 5.4 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Glue between visit intake and ai-nlp-service.
+
+collect_visit_text()       -> aggregates the patient's Persian intake text
+run_extraction_for_visit() -> text -> POST /extract -> AI symptom rows
+
+The results are stored through the existing bulk_add_ai_symptoms() flow, so
+the whole platform keeps consuming VisitSymptom rows exactly as before.
+"""
+import json
+import logging
+from typing import List, Optional
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import get_settings
+from app.exceptions import NLPServiceUnavailableError
+from app.schemas.clinical import AISymptomInput, AISymptomsBulkInput
+from app.schemas.nlp import DetectedEvidence, EvidenceExtractionResponse
+from app.services.nlp_client import extract_evidences
+from app.services.visit_service import VisitService
+
+logger = logging.getLogger(__name__)
+
+MAX_SYMPTOM_NAME = 150     # VisitSymptom.symptom_name column width
+NOTES_MAX_CHARS = 4000     # hard cap for the traceability JSON stored in notes
+
+
+def collect_visit_text(messages) -> str:
+    """Aggregate the patient's Persian intake text in chronological order.
+
+    Text messages contribute their content; file messages contribute only
+    their caption (attachment bytes are not OCR'd here). Non-patient messages
+    (ai / system follow-ups) are excluded — the model must only see the
+    patient's own words.
+    """
+    parts = [
+        (m.content or "").strip()
+        for m in sorted(messages, key=lambda m: m.sequence)
+        if m.sender_type == "patient" and (m.content or "").strip()
+    ]
+    return "\n".join(parts)
+
+
+def _evidence_to_symptom(evidence: DetectedEvidence) -> AISymptomInput:
+    """Map one detected evidence to an AI symptom row.
+
+    symptom_name prefers the Persian display name (falls back to the English
+    name, then the raw evidence_id) so the doctor UI stays readable; the
+    canonical evidence_id plus the full metadata travel in `notes` as JSON.
+    """
+    display_name = (evidence.name_fa or evidence.name or evidence.evidence_id)
+    display_name = display_name.strip()[:MAX_SYMPTOM_NAME]
+
+    trace = {"evidence_id": evidence.evidence_id}
+    if evidence.code_question:
+        trace["code_question"] = evidence.code_question
+    if evidence.question_fa:
+        trace["question_fa"] = evidence.question_fa
+    if evidence.question_en:
+        trace["question_en"] = evidence.question_en
+    if evidence.data_type:
+        trace["data_type"] = evidence.data_type
+    notes = json.dumps(trace, ensure_ascii=False, sort_keys=True)[:NOTES_MAX_CHARS]
+
+    return AISymptomInput(
+        symptom_name=display_name,
+        confidence=max(0.0, min(1.0, evidence.confidence)),
+        notes=notes,
+    )
+
+
+async def run_extraction_for_visit(
+    visit_id: UUID,
+    db: AsyncSession,
+    *,
+    fail_safe: bool = True,
+) -> Optional[EvidenceExtractionResponse]:
+    """Run evidence extraction for a visit and store the results as AI symptoms.
+
+    fail_safe=True  -> any failure is logged and None is returned. Used inside
+                       POST /visits/{id}/submit: an unavailable NLP service
+                       must never block the submission.
+    fail_safe=False -> raises NLPServiceUnavailableError on failure. Used by
+                       POST /visits/{id}/extract-evidences, where the caller
+                       explicitly asked for the extraction and wants feedback.
+    """
+    settings = get_settings()
+
+    if not settings.AI_NLP_ENABLED:
+        logger.info("AI NLP integration disabled — skipping extraction for visit %s", visit_id)
+        if fail_safe:
+            return None
+        raise NLPServiceUnavailableError(
+            "AI NLP integration is disabled (AI_NLP_ENABLED=false)"
+        )
+
+    service = VisitService(db)
+    messages = await service.list_messages(visit_id)
+    text = collect_visit_text(messages)
+
+    if not text:
+        logger.info("Visit %s has no patient text to analyse", visit_id)
+        return EvidenceExtractionResponse(
+            visit_id=visit_id,
+            text_chars=0,
+            detected=[],
+            stored_count=0,
+            duplicate_count=0,
+        )
+
+    if len(text) > settings.AI_NLP_TEXT_MAX_CHARS:
+        logger.info(
+            "Visit %s text truncated from %d to %d chars before sending",
+            visit_id, len(text), settings.AI_NLP_TEXT_MAX_CHARS,
+        )
+        text = text[: settings.AI_NLP_TEXT_MAX_CHARS]
+
+    result = await extract_evidences(text)
+    if result is None:
+        if fail_safe:
+            logger.warning(
+                "Evidence extraction failed for visit %s — continuing without AI symptoms",
+                visit_id,
+            )
+            return None
+        raise NLPServiceUnavailableError()
+
+    symptoms = [_evidence_to_symptom(e) for e in result.detected]
+    stored = await service.bulk_add_ai_symptoms(
+        visit_id,
+        AISymptomsBulkInput(
+            symptoms=symptoms,
+            model_version=(result.model_version or "")[:50] or None,
+        ),
+    )
+
+    outcome = EvidenceExtractionResponse(
+        visit_id=visit_id,
+        text_chars=len(text),
+        detected=result.detected,
+        stored_count=len(stored),
+        duplicate_count=len(result.detected) - len(stored),
+        model_version=result.model_version,
+        inference_time_ms=result.inference_time_ms,
+    )
+    logger.info(
+        "Extraction for visit %s: %d detected, %d stored, %d duplicate(s)",
+        visit_id, len(result.detected), len(stored), outcome.duplicate_count,
+    )
+    return outcome
+
+──────────────────────────────────────────────────────────────────────────────
+[31/34] services/nlp_client.py
+    104 lines · 3.6 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Async client for ai-triage-service (POST /extract-evidences).
+
+CHANGED: this client now calls ai-triage-service instead of ai-nlp-service
+directly. ai-triage-service is the internal orchestrator that:
+  - forwards the request to ai-nlp-service (ParsBERT)
+  - computes a clinical priority from red-flag patterns
+  - returns the enriched result
+
+The public surface of this module is unchanged (extract_evidences still
+returns the same ExtractResult), so evidence_extraction.py and the rest of
+visit-intake-service keep working without any other change.
+
+If ai-triage-service is unavailable we return None and the caller decides
+whether to fail loud (POST /extract-evidences) or soft (submit hook).
+"""
+import logging
+from typing import Optional
+
+import httpx
+
+from app.config import get_settings
+from app.schemas.nlp import ExtractResult, DetectedEvidence
+
+logger = logging.getLogger(__name__)
+
+
+async def extract_evidences(text: str) -> Optional[ExtractResult]:
+    """Send Persian free text to ai-triage-service and return the parsed result.
+
+    Returns None when:
+      - AI_TRIAGE_ENABLED is false,
+      - AI_TRIAGE_SERVICE_URL is empty,
+      - the call fails (network error / timeout / non-200 / malformed payload).
+    """
+    settings = get_settings()
+
+    if not settings.AI_TRIAGE_ENABLED:
+        logger.info("AI_TRIAGE_ENABLED is false — skipping evidence extraction")
+        return None
+
+    if not settings.AI_TRIAGE_SERVICE_URL:
+        logger.warning("AI_TRIAGE_SERVICE_URL is not set — skipping evidence extraction")
+        return None
+
+    payload = {"text": text}
+    if settings.AI_NLP_THRESHOLD is not None:
+        payload["threshold"] = settings.AI_NLP_THRESHOLD
+
+    headers = {}
+    if settings.INTERNAL_API_KEY:
+        headers["X-Internal-API-Key"] = settings.INTERNAL_API_KEY
+
+    # ai-triage-service exposes POST /extract-evidences (internal, X-Internal-API-Key)
+    url = f"{settings.AI_TRIAGE_SERVICE_URL.rstrip('/')}/extract-evidences"
+    try:
+        async with httpx.AsyncClient(timeout=settings.AI_TRIAGE_TIMEOUT_SECONDS) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+    except httpx.HTTPError as exc:
+        logger.warning("ai-triage-service call failed (%s): %s", url, exc)
+        return None
+
+    if resp.status_code != 200:
+        logger.warning(
+            "ai-triage-service returned HTTP %s: %s",
+            resp.status_code,
+            resp.text[:500],
+        )
+        return None
+
+    try:
+        body = resp.json()
+    except ValueError:
+        logger.warning("ai-triage-service returned a non-JSON body")
+        return None
+
+    # ai-triage-service returns TriageResponse = ExtractResponse + priority +
+    # red_flag_evidence_ids. We only need the ExtractResult fields here;
+    # priority is logged for observability but visit-intake-service doesn't
+    # use it (the frontend chat reads it via the preview endpoint).
+    try:
+        detected = [
+            DetectedEvidence.model_validate(d) for d in body.get("detected", [])
+        ]
+    except ValueError as exc:
+        logger.warning("ai-triage-service returned an unexpected evidence shape: %s", exc)
+        return None
+
+    result = ExtractResult(
+        detected=detected,
+        threshold=body.get("threshold"),
+        truncated=body.get("truncated"),
+        model_version=body.get("model_version"),
+        inference_time_ms=body.get("inference_time_ms"),
+    )
+
+    logger.info(
+        "ai-triage-service: %d evidence(s) in %s ms (priority=%s, model_version=%s)",
+        len(result.detected),
+        result.inference_time_ms,
+        body.get("priority"),
+        result.model_version,
+    )
+    return result
+
+──────────────────────────────────────────────────────────────────────────────
+[32/34] services/record_sync.py
+    58 lines · 1.9 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Sync hooks between visit-intake-service and medical-record-service.
+
+When a visit is created with (or linked to) a medical_record_id, we register
+the visit in the record's junction table via an internal call. Failures are
+logged but never block the visit operation (eventual consistency).
+"""
+import logging
+from uuid import UUID
+
+import httpx
+
+from app.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+
+async def sync_visit_to_record(
+    medical_record_id: UUID,
+    visit_id: UUID,
+    patient_id: UUID,
+    added_by: UUID | None = None,
+) -> bool:
+    """Register a visit on a medical record (POST /internal/records/{id}/visits).
+
+    Returns True on success. Any failure (network, 4xx/5xx) is logged and
+    swallowed so the visit flow is never broken by the sync.
+    """
+    settings = get_settings()
+    if not settings.MEDICAL_RECORD_SERVICE_URL:
+        logger.warning("MEDICAL_RECORD_SERVICE_URL not set; skipping record sync")
+        return False
+
+    payload = {"visit_id": str(visit_id), "patient_id": str(patient_id)}
+    if added_by:
+        payload["added_by"] = str(added_by)
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{settings.MEDICAL_RECORD_SERVICE_URL}"
+                f"/internal/records/{medical_record_id}/visits",
+                headers={"X-Internal-API-Key": settings.INTERNAL_API_KEY},
+                json=payload,
+            )
+            if resp.status_code == 201:
+                return True
+            # 409 duplicate link is fine — already registered
+            if resp.status_code == 409:
+                return True
+            logger.warning(
+                "record sync failed: status=%s body=%s",
+                resp.status_code, resp.text,
+            )
+            return False
+    except httpx.HTTPError as e:
+        logger.warning("record sync error: %s", e)
+        return False
+
+──────────────────────────────────────────────────────────────────────────────
+[33/34] services/storage_service.py
+    104 lines · 3.6 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Object storage service for visit file attachments (MinIO/S3-compatible)."""
+import uuid
+
+import boto3
+from botocore.client import Config
+from botocore.exceptions import ClientError
+from fastapi import UploadFile
+
+from app.config import get_settings
+from app.exceptions import InvalidFileError, FileTooLargeError
+
+
+class StorageService:
+    """Service for uploading/managing files exchanged inside visit messages."""
+
+    def __init__(self):
+        settings = get_settings()
+        self.settings = settings
+
+        protocol = "https" if settings.MINIO_SECURE else "http"
+        endpoint_url = f"{protocol}://{settings.MINIO_ENDPOINT}"
+
+        self.client = boto3.client(
+            "s3",
+            endpoint_url=endpoint_url,
+            aws_access_key_id=settings.MINIO_ACCESS_KEY,
+            aws_secret_access_key=settings.MINIO_SECRET_KEY,
+            config=Config(signature_version="s3v4"),
+            region_name="us-east-1",
+        )
+        self.bucket = settings.MINIO_BUCKET_NAME
+        self._ensure_bucket_exists()
+
+    def _ensure_bucket_exists(self):
+        try:
+            self.client.head_bucket(Bucket=self.bucket)
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "404":
+                self.client.create_bucket(Bucket=self.bucket)
+            else:
+                raise
+
+    def validate_file(self, file: UploadFile) -> None:
+        if file.content_type not in self.settings.ALLOWED_ATTACHMENT_TYPES:
+            raise InvalidFileError(
+                f"Invalid file type: {file.content_type}. "
+                f"Allowed types: {', '.join(self.settings.ALLOWED_ATTACHMENT_TYPES)}"
+            )
+
+    async def upload_attachment(self, file: UploadFile, visit_id: str) -> dict:
+        """Upload a file attachment for a visit message.
+
+        Returns a dict with attachment metadata ready to pass to VisitService.add_message.
+        """
+        self.validate_file(file)
+        content = await file.read()
+
+        max_size = self.settings.MAX_ATTACHMENT_SIZE_MB * 1024 * 1024
+        if len(content) > max_size:
+            raise FileTooLargeError(self.settings.MAX_ATTACHMENT_SIZE_MB)
+
+        ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
+        object_key = f"visits/{visit_id}/attachments/{uuid.uuid4()}.{ext}"
+
+        self.client.put_object(
+            Bucket=self.bucket,
+            Key=object_key,
+            Body=content,
+            ContentType=file.content_type,
+            Metadata={"uploaded-by": "visit-intake-service", "visit-id": visit_id},
+        )
+
+        url = self.client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self.bucket, "Key": object_key},
+            ExpiresIn=3600 * 24 * 7,
+        )
+
+        return {
+            "attachment_name": file.filename,
+            "attachment_content_type": file.content_type,
+            "attachment_size": len(content),
+            "attachment_key": object_key,
+            "attachment_url": url,
+        }
+
+    def get_file_url(self, object_key: str, expires_in: int = 3600 * 24 * 7) -> str | None:
+        """Fresh presigned URL (stored URLs expire, so regenerate on read)."""
+        try:
+            return self.client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self.bucket, "Key": object_key},
+                ExpiresIn=expires_in,
+            )
+        except ClientError:
+            return None
+
+    async def delete_file(self, object_key: str) -> bool:
+        try:
+            self.client.delete_object(Bucket=self.bucket, Key=object_key)
+            return True
+        except ClientError:
+            return False
+
+──────────────────────────────────────────────────────────────────────────────
+[34/34] services/visit_service.py
+    383 lines · 13.6 KB
+──────────────────────────────────────────────────────────────────────────────
+"""Business logic for visits, messages, symptoms, AI results and prescriptions."""
+from datetime import datetime
+from typing import Optional
+from uuid import UUID
+
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.models.visit import Visit
+from app.models.message import VisitMessage
+from app.models.clinical import (
+    VisitSymptom,
+    AIDiseaseSuggestion,
+    AIPrescriptionDraft,
+    FinalPrescription,
+    PrescriptionItem,
+)
+from app.models.chat import ChatMessage
+from app.schemas.visit import VisitCreate
+from app.schemas.clinical import (
+    SymptomCreate,
+    AISymptomsBulkInput,
+    DiseaseSuggestionsBulkInput,
+    AIPrescriptionDraftInput,
+    FinalPrescriptionCreate,
+)
+from app.exceptions import InvalidVisitStateError
+
+
+# Valid status transitions (visit lifecycle)
+ALLOWED_TRANSITIONS = {
+    "intake": {"ai_processing", "cancelled"},
+    "ai_processing": {"doctor_assigned", "cancelled"},
+    "doctor_assigned": {"in_chat", "cancelled"},
+    "in_chat": {"prescription_pending", "completed", "cancelled"},
+    "prescription_pending": {"completed", "cancelled"},
+    "completed": {"closed"},
+    "closed": set(),
+    "cancelled": set(),
+}
+
+
+class VisitService:
+    """Service layer for visit intake operations."""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    # =====================================================================
+    # VISIT LIFECYCLE
+    # =====================================================================
+
+    async def create_visit(self, patient_id: UUID, data: VisitCreate) -> Visit:
+        visit = Visit(patient_id=patient_id, **data.model_dump())
+        self.db.add(visit)
+        await self.db.flush()
+        return visit
+
+    async def get_visit(self, visit_id: UUID) -> Optional[Visit]:
+        """Get a visit with all related data eagerly loaded."""
+        result = await self.db.execute(select(Visit).where(Visit.id == visit_id))
+        return result.scalar_one_or_none()
+
+    async def list_patient_visits(self, patient_id: UUID) -> list[Visit]:
+        result = await self.db.execute(
+            select(Visit)
+            .where(Visit.patient_id == patient_id)
+            .order_by(Visit.started_at.desc())
+        )
+        return result.scalars().all()
+
+    async def list_doctor_visits(self, doctor_id: UUID) -> list[Visit]:
+        result = await self.db.execute(
+            select(Visit)
+            .where(
+                Visit.doctor_id == doctor_id,
+                Visit.status.notin_(["closed", "cancelled"]),
+            )
+            .order_by(Visit.started_at.desc())
+        )
+        return result.scalars().all()
+
+    async def list_queue(self) -> list[Visit]:
+        """Unassigned visits that are ready for a doctor (AI finished processing)."""
+        result = await self.db.execute(
+            select(Visit)
+            .where(Visit.status == "doctor_assigned", Visit.doctor_id.is_(None))
+            .order_by(Visit.started_at.asc())
+        )
+        return result.scalars().all()
+
+    async def transition(self, visit: Visit, new_status: str) -> Visit:
+        allowed = ALLOWED_TRANSITIONS.get(visit.status, set())
+        if new_status not in allowed:
+            raise InvalidVisitStateError(
+                f"Cannot move visit from '{visit.status}' to '{new_status}'"
+            )
+        visit.status = new_status
+        now = datetime.utcnow()
+        if new_status == "in_chat" and visit.doctor_joined_at is None:
+            visit.doctor_joined_at = now
+        if new_status == "completed" and visit.completed_at is None:
+            visit.completed_at = now
+        await self.db.flush()
+        return visit
+
+    async def claim(self, visit: Visit, doctor_id: UUID) -> Visit:
+        if visit.doctor_id is not None:
+            raise InvalidVisitStateError("Visit is already assigned to a doctor")
+        if visit.status != "doctor_assigned":
+            raise InvalidVisitStateError(
+                f"Visit is not ready for a doctor (status: {visit.status})"
+            )
+        visit.doctor_id = doctor_id
+        await self.transition(visit, "in_chat")
+        return visit
+
+    async def link_medical_record(self, visit: Visit, medical_record_id: UUID) -> Visit:
+        visit.medical_record_id = medical_record_id
+        await self.db.flush()
+        return visit
+
+    # =====================================================================
+    # INTAKE MESSAGES (text / file)
+    # =====================================================================
+
+    async def add_message(
+        self,
+        visit_id: UUID,
+        content: Optional[str] = None,
+        sender_type: str = "patient",
+        message_type: str = "text",
+        attachment: Optional[dict] = None,
+    ) -> VisitMessage:
+        result = await self.db.execute(
+            select(func.count())
+            .select_from(VisitMessage)
+            .where(VisitMessage.visit_id == visit_id)
+        )
+        sequence = result.scalar_one() + 1
+
+        message = VisitMessage(
+            visit_id=visit_id,
+            sender_type=sender_type,
+            message_type=message_type,
+            content=content,
+            sequence=sequence,
+            sent_at=datetime.utcnow(),
+            **(attachment or {}),
+        )
+        self.db.add(message)
+        await self.db.flush()
+        return message
+
+    async def list_messages(self, visit_id: UUID) -> list[VisitMessage]:
+        result = await self.db.execute(
+            select(VisitMessage)
+            .where(VisitMessage.visit_id == visit_id)
+            .order_by(VisitMessage.sequence.asc())
+        )
+        return result.scalars().all()
+
+    # =====================================================================
+    # SYMPTOMS (manual + AI)
+    # =====================================================================
+
+    async def add_symptom(
+        self, visit_id: UUID, data: SymptomCreate, source: str = "manual"
+    ) -> VisitSymptom:
+        symptom = VisitSymptom(visit_id=visit_id, source=source, **data.model_dump())
+        self.db.add(symptom)
+        await self.db.flush()
+        return symptom
+
+    async def bulk_add_ai_symptoms(
+        self, visit_id: UUID, payload: AISymptomsBulkInput
+    ) -> list[VisitSymptom]:
+        """Add AI-detected symptoms, skipping ones already stored for this visit."""
+        result = await self.db.execute(
+            select(VisitSymptom.symptom_name).where(
+                VisitSymptom.visit_id == visit_id,
+                VisitSymptom.source == "ai",
+            )
+        )
+        existing = {name.strip().lower() for name in result.scalars().all()}
+
+        added = []
+        for item in payload.symptoms:
+            if item.symptom_name.strip().lower() in existing:
+                continue
+            symptom = VisitSymptom(
+                visit_id=visit_id,
+                source="ai",
+                ai_model_version=payload.model_version,
+                **item.model_dump(),
+            )
+            self.db.add(symptom)
+            added.append(symptom)
+        await self.db.flush()
+        return added
+
+    async def list_symptoms(self, visit_id: UUID) -> list[VisitSymptom]:
+        result = await self.db.execute(
+            select(VisitSymptom)
+            .where(VisitSymptom.visit_id == visit_id)
+            .order_by(VisitSymptom.created_at.asc())
+        )
+        return result.scalars().all()
+
+    async def delete_symptom(self, visit_id: UUID, symptom_id: UUID) -> bool:
+        result = await self.db.execute(
+            select(VisitSymptom).where(
+                VisitSymptom.visit_id == visit_id,
+                VisitSymptom.id == symptom_id,
+                VisitSymptom.source == "manual",  # AI symptoms are only removed by AI re-run
+            )
+        )
+        symptom = result.scalar_one_or_none()
+        if not symptom:
+            return False
+        await self.db.delete(symptom)
+        await self.db.flush()
+        return True
+
+    # =====================================================================
+    # AI DISEASE SUGGESTIONS
+    # =====================================================================
+
+    async def replace_disease_suggestions(
+        self, visit_id: UUID, payload: DiseaseSuggestionsBulkInput
+    ) -> list[AIDiseaseSuggestion]:
+        """AI re-runs replace the previous suggestion list entirely."""
+        await self.db.execute(
+            delete(AIDiseaseSuggestion).where(AIDiseaseSuggestion.visit_id == visit_id)
+        )
+
+        suggestions = []
+        for item in payload.suggestions:
+            suggestion = AIDiseaseSuggestion(
+                visit_id=visit_id,
+                model_version=payload.model_version,
+                **item.model_dump(),
+            )
+            self.db.add(suggestion)
+            suggestions.append(suggestion)
+        await self.db.flush()
+        return suggestions
+
+    async def list_disease_suggestions(self, visit_id: UUID) -> list[AIDiseaseSuggestion]:
+        result = await self.db.execute(
+            select(AIDiseaseSuggestion)
+            .where(AIDiseaseSuggestion.visit_id == visit_id)
+            .order_by(AIDiseaseSuggestion.rank.asc())
+        )
+        return result.scalars().all()
+
+    async def decide_suggestion(
+        self, visit_id: UUID, suggestion_id: UUID, decision: str, doctor_id: UUID
+    ) -> Optional[AIDiseaseSuggestion]:
+        result = await self.db.execute(
+            select(AIDiseaseSuggestion).where(
+                AIDiseaseSuggestion.visit_id == visit_id,
+                AIDiseaseSuggestion.id == suggestion_id,
+            )
+        )
+        suggestion = result.scalar_one_or_none()
+        if not suggestion:
+            return None
+        suggestion.doctor_decision = decision
+        suggestion.decided_by = doctor_id
+        suggestion.decided_at = datetime.utcnow()
+        await self.db.flush()
+        return suggestion
+
+    # =====================================================================
+    # AI PRESCRIPTION DRAFT
+    # =====================================================================
+
+    async def save_draft(
+        self, visit_id: UUID, payload: AIPrescriptionDraftInput
+    ) -> AIPrescriptionDraft:
+        """Save a new draft; previous drafts are marked superseded."""
+        result = await self.db.execute(
+            select(AIPrescriptionDraft).where(
+                AIPrescriptionDraft.visit_id == visit_id,
+                AIPrescriptionDraft.status == "draft",
+            )
+        )
+        for old in result.scalars().all():
+            old.status = "superseded"
+
+        draft = AIPrescriptionDraft(
+            visit_id=visit_id,
+            items=[item.model_dump() for item in payload.items],
+            ai_notes=payload.ai_notes,
+            model_version=payload.model_version,
+        )
+        self.db.add(draft)
+        await self.db.flush()
+        return draft
+
+    async def get_latest_draft(self, visit_id: UUID) -> Optional[AIPrescriptionDraft]:
+        result = await self.db.execute(
+            select(AIPrescriptionDraft)
+            .where(
+                AIPrescriptionDraft.visit_id == visit_id,
+                AIPrescriptionDraft.status == "draft",
+            )
+            .order_by(AIPrescriptionDraft.created_at.desc())
+        )
+        return result.scalars().first()
+
+    # =====================================================================
+    # FINAL PRESCRIPTION (doctor)
+    # =====================================================================
+
+    async def issue_final_prescription(
+        self, visit_id: UUID, doctor_id: UUID, data: FinalPrescriptionCreate
+    ) -> FinalPrescription:
+        visit = await self.get_visit(visit_id)
+        if visit is None:
+            raise InvalidVisitStateError("Visit not found")
+        if visit.final_prescription is not None:
+            raise InvalidVisitStateError("Final prescription already issued for this visit")
+
+        prescription = FinalPrescription(
+            visit_id=visit_id,
+            doctor_id=doctor_id,
+            diagnosis_text=data.diagnosis_text,
+            notes=data.notes,
+            issued_at=datetime.utcnow(),
+        )
+        self.db.add(prescription)
+        await self.db.flush()
+
+        for index, item in enumerate(data.items):
+            self.db.add(
+                PrescriptionItem(
+                    prescription_id=prescription.id,
+                    sort_order=index,
+                    **item.model_dump(),
+                )
+            )
+        await self.db.flush()
+
+        await self.transition(visit, "completed")
+        return await self.get_final_prescription(visit_id)
+
+    async def get_final_prescription(self, visit_id: UUID) -> Optional[FinalPrescription]:
+        result = await self.db.execute(
+            select(FinalPrescription)
+            .options(selectinload(FinalPrescription.items))
+            .where(FinalPrescription.visit_id == visit_id)
+        )
+        return result.scalar_one_or_none()
+
+    # =====================================================================
+    # DOCTOR <-> PATIENT CHAT
+    # =====================================================================
+
+    async def add_chat_message(
+        self, visit_id: UUID, sender_id: UUID, sender_role: str, content: str
+    ) -> ChatMessage:
+        message = ChatMessage(
+            visit_id=visit_id,
+            sender_id=sender_id,
+            sender_role=sender_role,
+            content=content,
+            sent_at=datetime.utcnow(),
+        )
+        self.db.add(message)
+        await self.db.flush()
+        return message
+
+    async def list_chat_messages(self, visit_id: UUID) -> list[ChatMessage]:
+        result = await self.db.execute(
+            select(ChatMessage)
+            .where(ChatMessage.visit_id == visit_id)
+            .order_by(ChatMessage.sent_at.asc(), ChatMessage.created_at.asc())
+        )
+        return result.scalars().all()
+
+==============================================================================
+✅ پایان
+📊 34 فایل · 3,989 خط · 135.7 KB
+==============================================================================

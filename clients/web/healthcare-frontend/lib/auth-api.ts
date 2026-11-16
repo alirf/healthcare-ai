@@ -2,9 +2,31 @@
 
 // ==================== AUTH API CLIENT ====================
 // Healthcare Auth Service API Client
-// Base URL should be set via environment variable
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "/api/gateway";
+import { API_BASE } from "@/lib/api-base";
+import {
+  setTokens,
+  getAccessToken,
+  getRefreshToken,
+  clearTokens,
+  setUser,
+} from "@/lib/token";
+import type { AuthTokens, User } from "@/lib/token";
+
+// re-export برای سازگاری با import های قبلی صفحات
+export {
+  setTokens,
+  getAccessToken,
+  getRefreshToken,
+  clearTokens,
+  isTokenExpired,
+  setUser,
+  getUser,
+  refreshToken,
+} from "@/lib/token";
+export type { AuthTokens, User } from "@/lib/token";
+
+const API_BASE_URL = API_BASE;
 
 // ==================== TYPES ====================
 
@@ -17,7 +39,7 @@ export interface RegisterRequest {
 
 export interface OTPRequest {
   phone_number: string;
-  purpose: "REGISTER" | "LOGIN" | "FORGOT_PASSWORD";
+  purpose: "REGISTER" | "LOGIN" | "RESET_PASSWORD";
 }
 
 export interface OTPVerifyRequest {
@@ -35,10 +57,6 @@ export interface LoginOTPVerifyRequest {
   code: string;
 }
 
-export interface RefreshTokenRequest {
-  refresh_token: string;
-}
-
 export interface LogoutRequest {
   refresh_token: string;
 }
@@ -47,23 +65,6 @@ export interface ResetPasswordRequest {
   phone_number: string;
   code: string;
   new_password: string;
-}
-
-export interface AuthTokens {
-  access_token: string;
-  refresh_token: string;
-  expires_in: number;
-  token_type: string;
-}
-
-export interface User {
-  id: string;
-  phone_number: string;
-  email: string;
-  role: string;
-  is_phone_verified: boolean;
-  is_active: boolean;
-  created_at: string;
 }
 
 export interface LoginResponse {
@@ -79,70 +80,6 @@ export interface ApiResponse<T = unknown> {
   data?: T;
   error?: string;
 }
-
-// ==================== TOKEN MANAGEMENT ====================
-
-export const setTokens = (tokens: AuthTokens) => {
-  if (typeof window !== "undefined") {
-    localStorage.setItem("access_token", tokens.access_token);
-    localStorage.setItem("refresh_token", tokens.refresh_token);
-    localStorage.setItem("token_expires_at", String(Date.now() + tokens.expires_in * 1000));
-    document.cookie = `access_token=${tokens.access_token}; path=/; max-age=${tokens.expires_in}; SameSite=Lax`;
-  }
-};
-
-export const getAccessToken = (): string | null => {
-  if (typeof window !== "undefined") {
-    return localStorage.getItem("access_token");
-  }
-  return null;
-};
-
-export const getRefreshToken = (): string | null => {
-  if (typeof window !== "undefined") {
-    return localStorage.getItem("refresh_token");
-  }
-  return null;
-};
-
-export const clearTokens = () => {
-  if (typeof window !== "undefined") {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
-    localStorage.removeItem("token_expires_at");
-    localStorage.removeItem("user");
-    document.cookie = "access_token=; path=/; max-age=0";
-  }
-};
-
-export const isTokenExpired = (): boolean => {
-  if (typeof window !== "undefined") {
-    const expiresAt = localStorage.getItem("token_expires_at");
-    if (!expiresAt) return true;
-    return Date.now() >= parseInt(expiresAt);
-  }
-  return true;
-};
-
-export const setUser = (user: User) => {
-  if (typeof window !== "undefined") {
-    localStorage.setItem("user", JSON.stringify(user));
-  }
-};
-
-export const getUser = (): User | null => {
-  if (typeof window !== "undefined") {
-    const userStr = localStorage.getItem("user");
-    if (userStr) {
-      try {
-        return JSON.parse(userStr) as User;
-      } catch {
-        return null;
-      }
-    }
-  }
-  return null;
-};
 
 // ==================== API HELPERS ====================
 
@@ -295,28 +232,6 @@ export async function verifyLoginOTP(
       token_type: result.data.token_type,
     });
     setUser(result.data.user);
-  }
-
-  return result;
-}
-
-/**
- * Refresh access token
- * POST /auth/refresh
- */
-export async function refreshToken(): Promise<ApiResponse<AuthTokens>> {
-  const refresh = getRefreshToken();
-  if (!refresh) {
-    return { success: false, error: "توکن بازیابی یافت نشد" };
-  }
-
-  const result = await apiRequest<AuthTokens>("/auth/refresh", {
-    method: "POST",
-    body: JSON.stringify({ refresh_token: refresh }),
-  });
-
-  if (result.success && result.data) {
-    setTokens(result.data);
   }
 
   return result;

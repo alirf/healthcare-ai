@@ -30,6 +30,8 @@ export default function VisitPage() {
   const [selectedVisitId, setSelectedVisitId] = useState<string | undefined>();
   const [showVisitList, setShowVisitList] = useState(true);
   const [loadingVisit, setLoadingVisit] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // با تغییر chatKey کامپوننت چت کاملاً ریست می‌شود
   const [chatKey, setChatKey] = useState(0);
@@ -46,31 +48,41 @@ export default function VisitPage() {
       });
   }, []);
 
-  // ========== ویزیت جدید ==========
-  const handleNewVisit = () => {
-  const chat = chatRef.current;
+  // ذخیره ویزیت جاری روی سرور (submit → ai-nlp-service evidence extraction)
+    const persistCurrentVisit = async () => {
+    const chat = chatRef.current;
+    if (!chat || !chat.hasUserChatted()) return;
 
-  // حالت ۱: کاربر چتی نکرده → فقط ریست
-  if (!chat || !chat.hasUserChatted()) {
+    const snapshot = chat.getVisitSnapshot();
+    setSending(true);
+    setSaveError(null);
+    try {
+      await saveVisit({ messages: snapshot.messages, symptoms: snapshot.symptoms });
+      const fresh = await fetchVisits();
+      setVisits(fresh);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "خطا در ذخیره ویزیت";
+      console.error("خطا در ذخیره ویزیت:", err);
+      setSaveError(msg);
+      throw err;
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // ========== ویزیت جدید ==========
+  const handleNewVisit = async () => {
+    try {
+      await persistCurrentVisit();
+    } catch {
+      /* خطا در persistCurrentVisit مدیریت و در saveError نمایش داده شده */
+      return;
+    }
     setSelectedVisitId(undefined);
     setHistoryMessages(null);
+    setSaveError(null);
     setChatKey((k) => k + 1);
-    return;
-  }
-
-  // حالت ۲: ذخیره روی سرور و بعد تازه‌سازی لیست از سرور
-  const snapshot = chat.getVisitSnapshot();
-  saveVisit({ messages: snapshot.messages, symptoms: snapshot.symptoms })
-    .then(async () => {
-      const fresh = await fetchVisits();   // آیدی‌های واقعی از دیتابیس
-      setVisits(fresh);
-    })
-    .catch((err) => console.error("خطا در ذخیره ویزیت:", err));
-
-  setSelectedVisitId(undefined);
-  setHistoryMessages(null);
-  setChatKey((k) => k + 1);
-};
+  };
 
   // ========== انتخاب ویزیت قبلی ==========
   const handleSelectVisit = async (visit: VisitHistory) => {
@@ -115,13 +127,27 @@ export default function VisitPage() {
             </div>
           </div>
         )}
+        {saveError && (
+          <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 text-red-600 dark:text-red-400 text-xs px-4 py-2 rounded-xl shadow-md flex items-center gap-2 max-w-md">
+            <span className="flex-1">{saveError}</span>
+            <button
+              onClick={() => { setSaveError(null); persistCurrentVisit().catch(() => {}); }}
+              className="font-bold underline shrink-0"
+            >
+              تلاش مجدد
+            </button>
+          </div>
+        )}
 
         <SymptomChat
           key={chatKey}
           ref={chatRef}
-          onSendToDoctor={() => console.log("Sending to doctor...")}
+          onSendToDoctor={async () => {
+            await persistCurrentVisit();
+          }}
           initialMessages={historyMessages ?? undefined}
           readOnly={isReadOnly}
+          isSending={sending}
         />
       </div>
 

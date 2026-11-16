@@ -18,4 +18,4 @@ COPY alembic/ ./alembic/
 COPY alembic.ini .
 
 # Run migrations and start
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8002 --workers 4"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4"]

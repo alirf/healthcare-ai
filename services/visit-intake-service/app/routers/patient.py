@@ -27,9 +27,11 @@ from app.schemas.clinical import (
     AIPrescriptionDraftResponse,
     FinalPrescriptionResponse,
 )
+from app.schemas.nlp import EvidenceExtractionResponse
 from app.services.visit_service import VisitService
 from app.services.storage_service import StorageService
 from app.services.record_sync import sync_visit_to_record
+from app.services.evidence_extraction import run_extraction_for_visit
 
 router = APIRouter(prefix="/visits", tags=["Visit Intake"])
 
@@ -115,9 +117,20 @@ async def submit_visit(
     current_user: dict = Depends(require_role("patient")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Patient finished describing symptoms -> hand the visit over to the AI service."""
+    """Patient finished describing symptoms -> hand the visit over to the AI service.
+
+    Before the status flips to ai_processing, the visit's Persian intake text
+    is sent to ai-nlp-service (POST /extract) and the detected evidences are
+    stored as AI symptoms. The call is fail-safe: if the NLP service is down,
+    submission continues without AI symptoms and extraction can be re-run
+    later via POST /visits/{visit_id}/extract-evidences.
+    """
     service = VisitService(db)
     visit = await get_owned_visit(visit_id, current_user, db)
+
+    # ── AI hook: Persian intake text -> ai-nlp-service -> AI symptom rows ──
+    await run_extraction_for_visit(visit_id, db, fail_safe=True)
+
     return await service.transition(visit, "ai_processing")
 
 
@@ -229,6 +242,30 @@ async def delete_symptom(
     if not deleted:
         raise SymptomNotFoundError()
     return None
+
+
+# =====================================================================
+# AI EVIDENCE EXTRACTION (ai-nlp-service)
+# =====================================================================
+
+@router.post("/{visit_id}/extract-evidences", response_model=EvidenceExtractionResponse)
+async def extract_evidences(
+    visit_id: UUID,
+    current_user: dict = Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send the visit's Persian intake text to ai-nlp-service and get the output.
+
+    The patient's intake messages are aggregated and posted to the NLP
+    service; the detected evidences are returned in the response AND stored
+    as AI symptoms (source="ai", duplicates skipped).
+
+    Unlike the submit hook, failures are NOT swallowed here: a disabled
+    integration or an unreachable ai-nlp-service raises 502 so the caller
+    gets explicit feedback.
+    """
+    await get_owned_visit(visit_id, current_user, db)
+    return await run_extraction_for_visit(visit_id, db, fail_safe=False)
 
 
 # =====================================================================

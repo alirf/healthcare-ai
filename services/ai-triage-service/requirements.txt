@@ -1,0 +1,14 @@
+# AI Triage Service — dependencies
+# Internal orchestrator between caller services (visit-intake, ...) and
+# AI model services (ai-nlp-service, future LLM / vision models).
+#
+# Pin major versions for reproducible builds.
+
+--index-url https://pypi.org/simple
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+httpx==0.28.1
+python-dotenv==1.0.1

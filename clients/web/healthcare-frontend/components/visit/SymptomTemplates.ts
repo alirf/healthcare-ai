@@ -281,3 +281,48 @@ export function createSymptomData(type: string, id: string): SymptomData {
     completed: !config.requiresDetails,
   };
 }
+
+// ==================== EVIDENCE-BASED SYMPTOM DATA FACTORY ====================
+// NEW — replaces the hard-coded 6-symptom mock with real ParsBERT evidences.
+// Used by SymptomChat.handleSendMessage when it calls extractEvidences().
+
+/**
+ * Build a SymptomData box from a single detected evidence returned by
+ * ai-nlp-service (POST /api/intake/extract-evidences-preview).
+ *
+ * - `type` is set to the evidence_id (e.g. "E_21_0003") so the de-dup check
+ *   in SymptomChat (existingTypes.has(s.type)) works per-evidence instead
+ *   of the old 6 hard-coded strings.
+ * - `label` prefers the Persian name (`name_fa`), falls back to the English
+ *   `name`, then to the raw evidence_id — so the UI never shows an empty box.
+ * - `importance` is derived from the model's confidence so high-confidence
+ *   evidences surface as "important" in the UI automatically.
+ * - `requiresDetails=true` + a default severity of 5 means the user can open
+ *   the box and refine severity / body parts exactly like before.
+ */
+export function createSymptomDataFromEvidence(
+  evidenceId: string,
+  nameFa: string,
+  confidence: number,
+  index: number
+): SymptomData {
+  return {
+    id: `evidence-${evidenceId}-${Date.now()}-${index}`,
+    type: evidenceId,                                 // ← per-evidence dedup key
+    label: nameFa,
+    icon: "Activity",
+    color: "text-trust-500",
+    bgColor: "bg-trust-50 dark:bg-trust-900/20",
+    borderColor: "border-trust-200 dark:border-trust-800",
+    importance: confidence > 0.8 ? "high" : confidence > 0.5 ? "medium" : "low",
+    requiresDetails: true,
+    details: {
+      severity: 5,
+      bodyParts: [],
+      duration: "",
+      frequency: "",
+      description: "",
+    },
+    completed: false,
+  };
+}

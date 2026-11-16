@@ -1,0 +1,22 @@
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# Python caches / artefacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtualenvs
+.venv/
+venv/
+
+# Local secrets — never bake local env files into the image
+.env
+
+# Tests are executed outside the image
+tests/

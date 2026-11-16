@@ -12,7 +12,8 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(
     title=settings.APP_NAME,
     version="1.0.0",
-    description="سرویس احراز هویت سیستم ویزیت آنلاین"
+    description="سرویس احراز هویت سیستم ویزیت آنلاین",
+    redirect_slashes=False,
 )
 
 # CORS

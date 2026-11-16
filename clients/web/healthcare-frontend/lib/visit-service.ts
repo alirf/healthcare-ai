@@ -1,10 +1,7 @@
 // lib/visit-service.ts
 import type { ChatMessage, SymptomData, VisitHistory } from "@/types/visit";
 import { createSymptomData, symptomCategories } from "@/components/visit/SymptomTemplates";
-import { refreshToken, clearTokens } from "@/lib/auth-api";
-
-// از rewrite داخل next.config استفاده می‌کنیم → بدون مشکل CORS
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api/gateway";
+import { apiFetch } from "@/lib/api-config";
 
 // ==================== Backend response types ====================
 
@@ -37,51 +34,64 @@ interface ApiSymptom {
   created_at: string;
 }
 
-// ==================== Helpers ====================
+// ==================== Evidence extraction (ParsBERT) ====================
 
-function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("access_token");
+/**
+ * One evidence detected by ai-nlp-service and returned by
+ * POST /api/intake/extract-evidences-preview.
+ *
+ * Mirrors the backend DetectedEvidence schema in
+ * services/visit-intake-service/app/schemas/nlp.py.
+ */
+export interface ExtractedEvidence {
+  evidence_id: string;
+  name: string;
+  name_fa: string | null;
+  question_en: string | null;
+  question_fa: string | null;
+  data_type: string | null;
+  is_antecedent: boolean | null;
+  code_question: string | null;
+  confidence: number;
 }
 
-async function apiFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
-  const token = getToken();
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers ?? {}),
-    },
-  });
+interface ExtractPreviewResponse {
+  visit_id: string | null;
+  text_chars: number;
+  detected: ExtractedEvidence[];
+  stored_count: number;
+  duplicate_count: number;
+  model_version: string | null;
+  inference_time_ms: number | null;
+}
 
-  if (res.status === 401 && retry) {
-    // یک بار تلاش برای رفرش توکن
-    const refreshed = await refreshToken();
-    if (refreshed.success) {
-      return apiFetch<T>(path, options, false);
-    }
-    // رفرش هم ممکن نبود → پاک کردن و رفتن به لاگین
-    clearTokens();
-    if (typeof window !== "undefined") {
-      window.location.href = "/login";
-    }
-    throw new Error("نشست شما منقضی شده است. لطفاً دوباره وارد شوید.");
-  }
+/**
+ * Send free text to ai-nlp-service (ParsBERT) and receive the detected
+ * evidences. Replaces the old mock `detectSymptoms` in SymptomChat.tsx.
+ *
+ * Endpoint: POST /api/intake/extract-evidences-preview
+ *  - apiFetch injects the JWT (Authorization: Bearer ...) automatically.
+ *  - Next.js rewrites /api/intake/* to the Gateway → visit-intake-service.
+ *  - Gateway must apply StripPrefix=2 so /api/intake/extract-evidences-preview
+ *    becomes /extract-evidences-preview on the service side.
+ *
+ * Returns the raw evidences; the caller decides how to render them.
+ */
+export async function extractEvidences(
+  text: string,
+  threshold?: number
+): Promise<ExtractedEvidence[]> {
+  const body: { text: string; threshold?: number } = { text };
+  if (threshold !== undefined) body.threshold = threshold;
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => null);
-    const detail = err?.detail;
-    const message =
-      typeof detail === "string"
-        ? detail
-        : Array.isArray(detail)
-          ? detail.map((d) => d.msg).join(" | ")   // خطاهای 422 FastAPI
-          : `خطای سرور (${res.status})`;
-    throw new Error(message);
-  }
-  if (res.status === 204) return undefined as T;
-  return res.json();
+  const result = await apiFetch<ExtractPreviewResponse>(
+    "/api/intake/extract-evidences-preview",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    }
+  );
+  return result.detected ?? [];
 }
 
 // ==================== Mappings ====================
@@ -183,35 +193,52 @@ export async function saveVisit(payload: {
 }): Promise<string> {
   const firstUserMsg = payload.messages.find((m) => m.sender === "user")?.content;
 
-  const visit = await apiFetch<ApiVisit>("/api/intake/visits", {
-    method: "POST",
-    body: JSON.stringify({
-      chief_complaint: firstUserMsg ? firstUserMsg.slice(0, 200) : undefined,
-    }),
-  });
+  let visit: ApiVisit;
+  try {
+    visit = await apiFetch<ApiVisit>("/api/intake/visits", {
+      method: "POST",
+      body: JSON.stringify({
+        chief_complaint: firstUserMsg ? firstUserMsg.slice(0, 200) : undefined,
+      }),
+    });
+  } catch (e) {
+    throw new Error(`ساخت ویزیت ناموفق: ${e instanceof Error ? e.message : "خطای ناشناخته"}`);
+  }
 
   for (const m of payload.messages) {
     if (m.sender === "user" && m.content) {
-      await apiFetch(`/api/intake/visits/${visit.id}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ content: m.content }),
-      });
+      try {
+        await apiFetch(`/api/intake/visits/${visit.id}/messages`, {
+          method: "POST",
+          body: JSON.stringify({ content: m.content }),
+        });
+      } catch (e) {
+        throw new Error(`ارسال پیام ناموفق: ${e instanceof Error ? e.message : "خطای ناشناخته"}`);
+      }
     }
   }
 
   for (const s of payload.symptoms) {
-    await apiFetch(`/api/intake/visits/${visit.id}/symptoms`, {
-      method: "POST",
-      body: JSON.stringify({
-        symptom_name: s.label,                 // فارسی برای ParserBERT
-        severity: s.details?.severity ? severityFromNumber(s.details.severity) : undefined,
-        body_part: s.details?.bodyParts?.[0],
-        duration_description: s.details?.duration || undefined,
-        notes: s.details?.description || undefined,
-      }),
-    });
+    try {
+      await apiFetch(`/api/intake/visits/${visit.id}/symptoms`, {
+        method: "POST",
+        body: JSON.stringify({
+          symptom_name: s.label,
+          severity: s.details?.severity ? severityFromNumber(s.details.severity) : undefined,
+          body_part: s.details?.bodyParts?.[0],
+          duration_description: s.details?.duration || undefined,
+          notes: s.details?.description || undefined,
+        }),
+      });
+    } catch (e) {
+      throw new Error(`ثبت علامت «${s.label}» ناموفق: ${e instanceof Error ? e.message : "خطای ناشناخته"}`);
+    }
   }
 
-  await apiFetch(`/api/intake/visits/${visit.id}/submit`, { method: "POST" });
+  try {
+    await apiFetch(`/api/intake/visits/${visit.id}/submit`, { method: "POST" });
+  } catch (e) {
+    throw new Error(`ارسال نهایی به پزشک ناموفق: ${e instanceof Error ? e.message : "خطای ناشناخته"}`);
+  }
   return visit.id;
 }

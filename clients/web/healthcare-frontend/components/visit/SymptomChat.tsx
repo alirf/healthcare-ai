@@ -2,14 +2,17 @@
 
 import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Check, Plus, Sparkles } from "lucide-react";
+import { Check, Plus, Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ChatMessage, SymptomData, SymptomOption } from "@/types/visit";
 import ChatMessageComponent from "./ChatMessage";
 import ChatInput from "./ChatInput";
 import SymptomSelector from "./SymptomSelector";
-import { createSymptomData } from "./SymptomTemplates";
+// ← real model call (ParsBERT) replaces the old hard-coded mock
+import { extractEvidences } from "@/lib/visit-service";
+// ← evidence-aware factory: builds a SymptomData box from a detected evidence
+import { createSymptomData, createSymptomDataFromEvidence } from "./SymptomTemplates";
 
 // ==================== TYPES ====================
 
@@ -20,26 +23,29 @@ export interface SymptomChatHandle {
 }
 
 interface SymptomChatProps {
-  onSendToDoctor: () => void;
-  initialMessages?: ChatMessage[]; // پیام‌های ویزیت قبلی
-  readOnly?: boolean;              // حالت مشاهده‌ی تاریخچه
+  onSendToDoctor: () => Promise<void>;
+  initialMessages?: ChatMessage[];
+  readOnly?: boolean;
+  isSending?: boolean;
 }
 
 // ==================== COMPONENT ====================
 
 const SymptomChat = forwardRef<SymptomChatHandle, SymptomChatProps>(
-  ({ onSendToDoctor, initialMessages, readOnly = false }, ref) => {
+  ({ onSendToDoctor, initialMessages, readOnly = false, isSending = false }, ref) => {
     const [messages, setMessages] = useState<ChatMessage[]>(() => initialMessages ?? []);
     const [isLoading, setIsLoading] = useState(false);
     const [showSymptomSelector, setShowSymptomSelector] = useState(false);
     const [pendingSymptoms, setPendingSymptoms] = useState<SymptomData[]>([]);
     const [allConfirmed, setAllConfirmed] = useState(false);
+    const [internalSending, setInternalSending] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const chatContainerRef = useRef<HTMLDivElement>(null);
 
     // Expose methods to parent (VisitPage)
     useImperativeHandle(ref, () => ({
-      hasUserChatted: () => messages.some((m) => m.sender === "user"),
+      hasUserChatted: () =>
+        messages.some((m) => m.sender === "user") || pendingSymptoms.length > 0,
       getVisitSnapshot: () => ({ messages, symptoms: pendingSymptoms }),
       reset: () => {
         setMessages([]);
@@ -63,9 +69,14 @@ const SymptomChat = forwardRef<SymptomChatHandle, SymptomChatProps>(
       });
     };
 
-    // Handle user message
+    // ====================================================================
+    // REAL evidence extraction — replaces the old mock detectSymptoms().
+    // The mock is GONE; this function is the only path from user text →
+    // symptom boxes. It calls POST /api/intake/extract-evidences-preview,
+    // which forwards to ai-nlp-service (ParsBERT) and returns real evidences.
+    // ====================================================================
     const handleSendMessage = async (content: string) => {
-      if (readOnly) return; // در حالت مشاهده تاریخچه اجازه چت نیست
+      if (readOnly) return;
 
       const userMessage: ChatMessage = {
         id: `msg-${Date.now()}`,
@@ -79,86 +90,97 @@ const SymptomChat = forwardRef<SymptomChatHandle, SymptomChatProps>(
       setMessages((prev) => [...prev, userMessage]);
       setIsLoading(true);
 
-      setTimeout(() => {
-        const thinkingMessage: ChatMessage = {
-          id: `thinking-${Date.now()}`,
-          sender: "ai",
-          type: "text",
-          content: "🔍 در حال تحلیل علائم شما...",
-          timestamp: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, thinkingMessage]);
+      // transient "thinking" bubble — removed once the model responds
+      const thinkingMessage: ChatMessage = {
+        id: `thinking-${Date.now()}`,
+        sender: "ai",
+        type: "text",
+        content: "🔍 در حال تحلیل علائم شما...",
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, thinkingMessage]);
 
-        setTimeout(() => {
-          setMessages((prev) => prev.filter((m) => m.id !== thinkingMessage.id));
+      try {
+        const evidences = await extractEvidences(content);
 
-          const detectedSymptoms = detectSymptoms(content);
-          const symptomBoxes = detectedSymptoms.map((type, i) =>
-            createSymptomData(type, `symptom-${Date.now()}-${i}`)
-          );
+        // drop the thinking bubble before rendering the result
+        setMessages((prev) => prev.filter((m) => m.id !== thinkingMessage.id));
 
-          const existingTypes = new Set(pendingSymptoms.map((s) => s.type));
-          const newUniqueSymptoms = symptomBoxes.filter((s) => !existingTypes.has(s.type));
-
-          if (newUniqueSymptoms.length === 0) {
-            const noNewSymptomsMessage: ChatMessage = {
+        // No evidence detected → tell the user to use the manual picker
+        if (evidences.length === 0) {
+          setMessages((prev) => [
+            ...prev,
+            {
               id: `ai-${Date.now()}`,
               sender: "ai",
               type: "text",
-              content: "✅ این علائم قبلاً ثبت شده‌اند. لطفاً علائم جدید رو از دکمه 'اضافه کردن علامت' انتخاب کنید.",
+              content: "✅ در متن شما علامت مشخصی از لیست موجود پیدا نکردم. لطفاً از دکمه «اضافه کردن علامت» استفاده کنید.",
               timestamp: new Date().toISOString(),
-            };
-            setMessages((prev) => [...prev, noNewSymptomsMessage]);
-            setIsLoading(false);
-            return;
-          }
-
-          const aiMessage: ChatMessage = {
-            id: `ai-${Date.now()}`,
-            sender: "ai",
-            type: "symptoms",
-            content: `✨ علائم جدید زیر از پیام شما شناسایی شد:`,
-            symptoms: newUniqueSymptoms,
-            timestamp: new Date().toISOString(),
-          };
-
-          setMessages((prev) => [...prev, aiMessage]);
-          setPendingSymptoms((prev) => [...prev, ...newUniqueSymptoms]);
+            },
+          ]);
           setIsLoading(false);
-        }, 2000);
-      }, 500);
-    };
+          return;
+        }
 
-    // Simple symptom detection (mock)
-    const detectSymptoms = (text: string): string[] => {
-      const symptoms: string[] = [];
-      const lowerText = text.toLowerCase();
-      const existingTypes = new Set(pendingSymptoms.map((s) => s.type));
+        // Build one SymptomData box per detected evidence
+        const symptomBoxes = evidences.map((e, i) =>
+          createSymptomDataFromEvidence(
+            e.evidence_id,
+            // prefer Persian label, fall back to English, then to the raw id
+            e.name_fa || e.name || e.evidence_id,
+            e.confidence,
+            i
+          )
+        );
 
-      if ((lowerText.includes("تب") || lowerText.includes("گرم") || lowerText.includes("لرز")) && !existingTypes.has("fever")) {
-        symptoms.push("fever");
-      }
-      if ((lowerText.includes("سرفه") || lowerText.includes("خلط")) && !existingTypes.has("cough")) {
-        symptoms.push("cough");
-      }
-      if ((lowerText.includes("درد") || lowerText.includes("کمر درد") || lowerText.includes("درد بدن")) && !existingTypes.has("pain")) {
-        symptoms.push("pain");
-      }
-      if ((lowerText.includes("سردرد") || lowerText.includes("سر درد") || lowerText.includes("میگرن")) && !existingTypes.has("headache")) {
-        symptoms.push("headache");
-      }
-      if ((lowerText.includes("استفراغ") || lowerText.includes("بالا آوردن") || lowerText.includes("حالت تهوع")) && !existingTypes.has("vomiting")) {
-        symptoms.push("vomiting");
-      }
-      if ((lowerText.includes("پوست") || lowerText.includes("جوش") || lowerText.includes("ضایعه") || lowerText.includes("راش")) && !existingTypes.has("skin_lesion")) {
-        symptoms.push("skin_lesion");
-      }
+        // De-dup against already-pending symptom types so the same evidence
+        // is never added twice across two consecutive messages.
+        const existingTypes = new Set(pendingSymptoms.map((s) => s.type));
+        const newUniqueSymptoms = symptomBoxes.filter((s) => !existingTypes.has(s.type));
 
-      if (symptoms.length === 0 && pendingSymptoms.length === 0) {
-        symptoms.push("pain", "fever");
-      }
+        if (newUniqueSymptoms.length === 0) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `ai-${Date.now()}`,
+              sender: "ai",
+              type: "text",
+              content: "✅ این علائم قبلاً ثبت شده‌اند. لطفاً علائم جدید را از دکمه «اضافه کردن علامت» انتخاب کنید.",
+              timestamp: new Date().toISOString(),
+            },
+          ]);
+          setIsLoading(false);
+          return;
+        }
 
-      return symptoms;
+        const aiMessage: ChatMessage = {
+          id: `ai-${Date.now()}`,
+          sender: "ai",
+          type: "symptoms",
+          content: "✨ علائم جدید زیر از پیام شما شناسایی شد:",
+          symptoms: newUniqueSymptoms,
+          timestamp: new Date().toISOString(),
+        };
+
+        setMessages((prev) => [...prev, aiMessage]);
+        setPendingSymptoms((prev) => [...prev, ...newUniqueSymptoms]);
+      } catch (err) {
+        // Surface the failure explicitly — never fall back to fake symptoms
+        setMessages((prev) => prev.filter((m) => m.id !== thinkingMessage.id));
+        const reason = err instanceof Error ? err.message : "خطای ناشناخته";
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `error-${Date.now()}`,
+            sender: "ai",
+            type: "text",
+            content: `❌ خطا در تحلیل علائم: ${reason}`,
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+      } finally {
+        setIsLoading(false);
+      }
     };
 
     // Handle symptom update
@@ -200,8 +222,8 @@ const SymptomChat = forwardRef<SymptomChatHandle, SymptomChatProps>(
     };
 
     // Handle confirm all symptoms
-    const handleConfirmAll = () => {
-      if (readOnly) return;
+    const handleConfirmAll = async () => {
+      if (readOnly || internalSending || isSending) return;
       const allCompleted = pendingSymptoms.every((s) => s.completed);
       if (!allCompleted) {
         const errorMessage: ChatMessage = {
@@ -216,6 +238,7 @@ const SymptomChat = forwardRef<SymptomChatHandle, SymptomChatProps>(
       }
 
       setAllConfirmed(true);
+      setInternalSending(true);
 
       const confirmMessage: ChatMessage = {
         id: `confirm-${Date.now()}`,
@@ -226,8 +249,9 @@ const SymptomChat = forwardRef<SymptomChatHandle, SymptomChatProps>(
       };
       setMessages((prev) => [...prev, confirmMessage]);
 
+      const sendingId = `ai-sending-${Date.now()}`;
       const aiResponse: ChatMessage = {
-        id: `ai-response-${Date.now()}`,
+        id: sendingId,
         sender: "ai",
         type: "text",
         content: "🔄 در حال ارسال اطلاعات به پزشک...",
@@ -235,17 +259,36 @@ const SymptomChat = forwardRef<SymptomChatHandle, SymptomChatProps>(
       };
       setMessages((prev) => [...prev, aiResponse]);
 
-      setTimeout(() => {
-        onSendToDoctor();
-        const successMessage: ChatMessage = {
-          id: `success-${Date.now()}`,
-          sender: "ai",
-          type: "text",
-          content: "✅ اطلاعات شما با موفقیت به پزشک ارسال شد.",
-          timestamp: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, successMessage]);
-      }, 500);
+      try {
+        await onSendToDoctor();
+        setMessages((prev) =>
+          prev
+            .filter((m) => m.id !== sendingId)
+            .concat({
+              id: `success-${Date.now()}`,
+              sender: "ai",
+              type: "text",
+              content: "✅ اطلاعات شما با موفقیت به پزشک ارسال شد.",
+              timestamp: new Date().toISOString(),
+            })
+        );
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : "خطای ناشناخته";
+        setMessages((prev) =>
+          prev
+            .filter((m) => m.id !== sendingId)
+            .concat({
+              id: `error-send-${Date.now()}`,
+              sender: "ai",
+              type: "text",
+              content: `❌ ارسال ناموفق بود: ${reason}. لطفاً دوباره تلاش کنید.`,
+              timestamp: new Date().toISOString(),
+            })
+        );
+        setAllConfirmed(false);
+      } finally {
+        setInternalSending(false);
+      }
     };
 
     // Handle add symptoms from selector
@@ -388,18 +431,24 @@ const SymptomChat = forwardRef<SymptomChatHandle, SymptomChatProps>(
               <Button
                 size="sm"
                 onClick={handleConfirmAll}
-                disabled={!pendingSymptoms.every((s) => s.completed)}
+                disabled={!pendingSymptoms.every((s) => s.completed) || internalSending || isSending}
                 className={cn(
                   "h-9 text-xs text-white shadow-lg shadow-trust-500/25",
-                  pendingSymptoms.every((s) => s.completed)
+                  pendingSymptoms.every((s) => s.completed) && !internalSending && !isSending
                     ? "bg-gradient-to-r from-trust-500 to-healing-500 hover:from-trust-600 hover:to-healing-600 cursor-pointer"
                     : "bg-gray-400 dark:bg-gray-600 cursor-not-allowed opacity-60"
                 )}
               >
-                <Check className="w-3.5 h-3.5 ml-1" />
-                {pendingSymptoms.every((s) => s.completed)
-                  ? "تأیید و ارسال به پزشک"
-                  : `${pendingSymptoms.filter((s) => !s.completed).length} علامت ناقص`}
+                {internalSending || isSending ? (
+                  <Loader2 className="w-3.5 h-3.5 ml-1 animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5 ml-1" />
+                )}
+                {internalSending || isSending
+                  ? "در حال ارسال..."
+                  : pendingSymptoms.every((s) => s.completed)
+                    ? "تأیید و ارسال به پزشک"
+                    : `${pendingSymptoms.filter((s) => !s.completed).length} علامت ناقص`}
               </Button>
             </motion.div>
           )}
